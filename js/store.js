@@ -21,7 +21,7 @@ const DEFAULTS = {
     traffic: true,       // trafik katmanı (anahtar varsa)
     mapType: 'standard', // standard | satellite
     voiceEngine: 'system', // system | fahrettin | fettah | dfki
-    icon: 'mavi'
+    icon: 'komur'
   }
 };
 

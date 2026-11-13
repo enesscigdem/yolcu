@@ -10,8 +10,8 @@
   <meta name="format-detection" content="telephone=no">
   <title>Yolcu</title>
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="apple-touch-icon" href="icons/mavi-180.png">
-  <link rel="icon" type="image/png" href="icons/mavi-180.png">
+  <link rel="apple-touch-icon" href="icons/komur-180.png">
+  <link rel="icon" type="image/png" href="icons/komur-180.png">
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
   <link rel="stylesheet" href="app.css">
 </head>
@@ -44,6 +44,7 @@
 
   <!-- Navigasyon -->
   <div id="nav" class="nav" hidden>
+    <!-- Talimat, "ardından" ve uyarı tek kartta -->
     <div class="nav-card">
       <div class="nav-main">
         <div id="nav-icon" class="nav-icon"></div>
@@ -52,12 +53,18 @@
           <div id="nav-action" class="nav-action"></div>
           <div id="nav-road" class="nav-road"></div>
         </div>
+        <div class="nav-progress"><i id="nav-prog"></i></div>
       </div>
       <div id="nav-then" class="nav-then" hidden></div>
+      <div id="nav-alert" class="nav-alert" hidden></div>
+      <div id="nav-status" class="nav-status" hidden></div>
     </div>
-    <div id="nav-alert" class="nav-alert" hidden></div>
-    <div id="nav-status" class="nav-status" hidden></div>
   </div>
+
+  <button id="sim-badge" class="sim-badge" data-act="simSpeed" hidden></button>
+
+  <!-- Varış özeti -->
+  <div id="arrive" class="arrive" hidden></div>
 
   <div id="nav-side" class="nav-side" hidden>
     <button id="nav-overview" class="round" data-act="overview" aria-label="Tüm rota"></button>

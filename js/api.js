@@ -330,9 +330,50 @@ export async function reroute(from, to, oldRoute, along, prefs, avoids) {
 /* ---------------- Hava durumu (Open-Meteo, anahtarsız) ---------------- */
 const WMO = [[[0], '☀️', '🌙'], [[1, 2], '🌤️', '☁️'], [[3], '☁️', '☁️'], [[45, 48], '🌫️', '🌫️'], [[51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82], '🌧️', '🌧️'], [[71, 73, 75, 77, 85, 86], '❄️', '❄️'], [[95, 96, 99], '⛈️', '⛈️']];
 export async function weather(lat, lon) {
-  const u = `https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(3)}&longitude=${lon.toFixed(3)}&current=temperature_2m,weather_code,is_day&timezone=auto`;
+  const u = `https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(3)}&longitude=${lon.toFixed(3)}&current=temperature_2m,weather_code,is_day&daily=sunrise,sunset&forecast_days=1&timezone=auto&timeformat=unixtime`;
   const j = await fetch(u).then(r => r.json());
   const c = j.current;
   const row = WMO.find(([codes]) => codes.includes(c.weather_code)) || WMO[2];
-  return { temp: Math.round(c.temperature_2m), icon: c.is_day ? row[1] : row[2], code: c.weather_code };
+  return {
+    temp: Math.round(c.temperature_2m), icon: c.is_day ? row[1] : row[2], code: c.weather_code,
+    // Gün doğumu / batımı (ms): harita teması "otomatik"te bunlara göre geçer
+    sunrise: (j.daily?.sunrise?.[0] || 0) * 1000, sunset: (j.daily?.sunset?.[0] || 0) * 1000
+  };
+}
+
+/* ---------------- Hızlı süre (karşılama kartı ve favoriler için tek istek) ---------------- */
+export async function quickRoute(from, to, prefs, signal) {
+  const j = await vpost('/route', buildRequest([loc(from), loc(to)], prefs, [], 'comfort', 0), signal);
+  return { time: j.trip.summary.time, lengthM: j.trip.summary.length * 1000 };
+}
+
+/* ---------------- Kategoriye göre yakındakiler ---------------- */
+export const CATEGORIES = [
+  // tiles: haritadaki mekan sınıfları (anında), tt: TomTom kategori kodları (hızlı), tag: Overpass (son çare)
+  { id: 'fuel', label: 'Benzin', tiles: ['fuel'], tt: '7311', tag: '"amenity"="fuel"', r: 5000, fallback: 'Akaryakıt istasyonu', kind: 'fuel' },
+  { id: 'pharmacy', label: 'Eczane', tiles: ['pharmacy'], tt: null, tag: '"amenity"="pharmacy"', r: 2500, fallback: 'Eczane', kind: 'health' },
+  { id: 'parking', label: 'Otopark', tiles: ['parking'], tt: '7369,7313', tag: '"amenity"="parking"', r: 2000, fallback: 'Otopark', kind: 'parking' },
+  { id: 'cafe', label: 'Kafe', tiles: ['cafe'], tt: '9376', tag: '"amenity"="cafe"', r: 2000, fallback: 'Kafe', kind: 'food' },
+  { id: 'market', label: 'Market', tiles: ['grocery'], tt: '7332', tag: '"shop"="supermarket"', r: 2500, fallback: 'Market', kind: 'shop' },
+  { id: 'hospital', label: 'Hastane', tiles: ['hospital'], tt: null, tag: '"amenity"="hospital"', r: 8000, fallback: 'Hastane', kind: 'health' }
+];
+const OVERPASS = ['https://maps.mail.ru/osm/tools/overpass/api/interpreter', 'https://overpass-api.de/api/interpreter'];
+// Konumun çevresindeki gerçek mekanlar (OpenStreetMap etiketleriyle, isimsiz olanlar dahil)
+export async function nearby(cat, near, signal) {
+  const q = `[out:json][timeout:15];nwr[${cat.tag}](around:${cat.r},${near.lat.toFixed(5)},${near.lon.toFixed(5)});out center 60;`;
+  let j = null, err;
+  for (const url of OVERPASS) {
+    try {
+      const r = await fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(q), headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, signal });
+      if (r.ok) { j = await r.json(); break; }
+    } catch (e) { if (e.name === 'AbortError') throw e; err = e; }
+  }
+  if (!j) throw err || new Error('Yakındakiler alınamadı');
+  return (j.elements || []).map(e => {
+    const t = e.tags || {};
+    const lat = e.lat ?? e.center?.lat, lon = e.lon ?? e.center?.lon;
+    const street = [t['addr:street'], t['addr:housenumber']].filter(Boolean).join(' No:');
+    const sub = [t.brand && t.brand !== t.name ? t.brand : null, street, t['addr:suburb'] || t['addr:district']].filter(Boolean).join(', ');
+    return { name: t.name || t.brand || cat.fallback, sub, lat, lon, kind: cat.kind };
+  }).filter(p => p.lat != null);
 }

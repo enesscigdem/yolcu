@@ -5,6 +5,23 @@ const OUT = process.argv[2];
 mkdirSync(OUT, { recursive: true });
 
 const ICONS = {
+  // 0) Kömür (varsayılan): arayüzle aynı kimlik — kömür zemin, deniz yeşili ok, ufka giden ince yol
+  komur: `
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#25272C"/><stop offset="1" stop-color="#101114"/></linearGradient>
+    <radialGradient id="halo" cx=".5" cy=".56" r=".42"><stop offset="0" stop-color="#2FC2B2" stop-opacity=".28"/><stop offset="1" stop-color="#2FC2B2" stop-opacity="0"/></radialGradient>
+    <linearGradient id="road" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2FC2B2" stop-opacity="0"/><stop offset="1" stop-color="#2FC2B2" stop-opacity=".55"/></linearGradient>
+    <filter id="sh" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#000" flood-opacity=".55"/></filter>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <rect width="1024" height="1024" fill="url(#halo)"/>
+  <path d="M512 1024 C 500 860 470 780 520 690" stroke="url(#road)" stroke-width="34" stroke-linecap="round" fill="none"/>
+  <circle cx="512" cy="560" r="250" fill="none" stroke="#2FC2B2" stroke-opacity=".22" stroke-width="10"/>
+  <g filter="url(#sh)">
+    <path d="M512 300 C522 300 529 305 533 314 L668 682 C676 704 652 722 632 709 L524 640 C516 635 508 635 500 640 L392 709 C372 722 348 704 356 682 L491 314 C495 305 502 300 512 300 Z" fill="#2FC2B2"/>
+    <path d="M512 300 L512 637 C508 637 504 638 500 640 L392 709 C372 722 348 704 356 682 L491 314 C495 305 502 300 512 300 Z" fill="#7FE3D7" fill-opacity=".55"/>
+  </g>`,
+
   // 1) Mavi: cam efektli yön oku
   mavi: `
   <defs>

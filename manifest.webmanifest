@@ -8,7 +8,7 @@
   "orientation": "portrait",
   "background_color": "#F3F1EC",
   "icons": [
-    { "src": "icons/mavi-180.png", "sizes": "180x180", "type": "image/png" },
-    { "src": "icons/mavi-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+    { "src": "icons/komur-180.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "icons/komur-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
   ]
 }

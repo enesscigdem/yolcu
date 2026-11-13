@@ -12,6 +12,8 @@ export const PALETTES = {
   light: {
     land: '#EFEDE8', residential: '#ECEAE4', park: '#D3E3C4', wood: '#C3D9B2', water: '#A9CDE6', sand: '#EDE5CF', ice: '#FFFFFF',
     building: '#E2DFD8', building3d: '#F3F1ED', building3dTall: '#DAD6CE', hospital: '#F0E1DF', school: '#ECE6D8', aeroway: '#E6E3DC',
+    // Binalar arasında çok hafif ton farkı (hepsi aynı kutu gibi durmasın)
+    bTones: ['#F4F2EE', '#EEEBE5', '#F1EDE6'], poiBg: '#FFFFFF', poiFg: '#4A4A4F',
     motorway: '#F6E2B8', motorwayCase: '#D7B87A', primary: '#FFFFFF', primaryCase: '#CFC9BE',
     secondary: '#FFFFFF', secondaryCase: '#D7D2C9', minor: '#FFFFFF', minorCase: '#DFDAD2', path: '#E3DED4', rail: '#CFCAC0',
     navRoad: '#A9A9AE', navRoadCase: '#E3E3E6', navMotorway: '#BDBDC2',
@@ -22,7 +24,8 @@ export const PALETTES = {
   },
   dark: {
     land: '#1A1B1E', residential: '#1E1F22', park: '#1B2820', wood: '#19261E', water: '#0F2234', sand: '#2B2A25', ice: '#34363B',
-    building: '#25272B', building3d: '#2C2E33', building3dTall: '#3B3E45', hospital: '#2D2427', school: '#2A2925', aeroway: '#24252A',
+    building: '#25272B', building3d: '#2E323A', building3dTall: '#434956', hospital: '#2D2427', school: '#2A2925', aeroway: '#24252A',
+    bTones: ['#2E323A', '#2A2E35', '#33373F'], poiBg: '#26282D', poiFg: '#C9C9CE',
     motorway: '#4A4436', motorwayCase: '#2E2A21', primary: '#3A3C42', primaryCase: '#242529',
     secondary: '#34363B', secondaryCase: '#222326', minor: '#2E3035', minorCase: '#1F2023', path: '#2A2B2F', rail: '#2E3034',
     navRoad: '#4A4D55', navRoadCase: '#26272B', navMotorway: '#5A5E66',
@@ -55,10 +58,24 @@ export async function loadStyle() {
       }
     }
     if (l.id === 'building') l.minzoom = 14;
-    if (l.id === 'building-3d') l.minzoom = 15;
-    if (l.id === 'poi_r20') l.minzoom = Math.max(l.minzoom || 0, 16.5);
-    if (l.id === 'poi_r7') l.minzoom = Math.max(l.minzoom || 0, 15.5);
+    if (l.id === 'building-3d') l.minzoom = 15.3;
   }
+  // Hazır renkli mekan ikonlarını kaldır; yerine sade, tek renkli kendi katmanımız (işe yarayan türler)
+  style.layers = style.layers.filter(l => l['source-layer'] !== 'poi');
+  const labelIdx = style.layers.findIndex(l => l.id === 'highway-name-path');
+  style.layers.splice(labelIdx < 0 ? style.layers.length : labelIdx, 0, {
+    id: 'yolcu-poi', type: 'symbol', source: 'openmaptiles', 'source-layer': 'poi', minzoom: 15,
+    filter: ['match', ['get', 'class'], ['pharmacy', 'fuel', 'hospital', 'parking', 'railway'], true, false],
+    layout: {
+      'icon-image': ['concat', 'poi-', ['get', 'class']],
+      'icon-size': ['interpolate', ['linear'], ['zoom'], 15, 0.8, 18, 1],
+      'icon-allow-overlap': false,
+      'text-field': ['step', ['zoom'], '', 16.5, ['coalesce', ['get', 'name:tr'], ['get', 'name']]],
+      'text-font': ['Noto Sans Regular'], 'text-size': 11, 'text-offset': [0, 1.35], 'text-anchor': 'top',
+      'text-max-width': 8, 'text-optional': true, 'symbol-sort-key': ['match', ['get', 'class'], 'hospital', 0, 'pharmacy', 1, 'fuel', 2, 3]
+    },
+    paint: { 'text-color': '#6C6C71', 'text-halo-color': '#FFFFFF', 'text-halo-width': 1.3 }
+  });
   style.sources.dem = { type: 'raster-dem', tiles: [DEM_URL], tileSize: 512, maxzoom: 12, encoding: 'terrarium', attribution: '© Mapterhorn' };
   // 3B arazi için ayrı kaynak (MapLibre önerisi: gölge ve arazi aynı kaynağı paylaşmasın)
   style.sources.dem3d = { type: 'raster-dem', tiles: [DEM_URL], tileSize: 512, maxzoom: 12, encoding: 'terrarium' };
@@ -68,7 +85,7 @@ export async function loadStyle() {
     id: 'yolcu-hillshade', type: 'hillshade', source: 'dem', maxzoom: 16,
     paint: { 'hillshade-exaggeration': 0.45, 'hillshade-shadow-color': '#47523F', 'hillshade-highlight-color': '#FFFFFF', 'hillshade-illumination-direction': 315 }
   });
-  style.layers.splice(1, 0, { id: 'yolcu-sat', type: 'raster', source: 'sat', layout: { visibility: 'none' }, paint: { 'raster-fade-duration': 150, 'raster-contrast': 0.08, 'raster-saturation': 0.08 } });
+  style.layers.splice(1, 0, { id: 'yolcu-sat', type: 'raster', source: 'sat', layout: { visibility: 'none' }, paint: { 'raster-fade-duration': 150, 'raster-contrast': 0.1, 'raster-saturation': 0.05, 'raster-resampling': 'linear' } });
   return style;
 }
 
@@ -120,12 +137,14 @@ export function applyPalette(map, P, opts = {}) {
     }
     if (l.type === 'fill-extrusion') {
       vis(id, !sat);
-      // Yüksekliğe göre ton: alçak yapılar açık, yüksekler bir ton koyu → derinlik hissi
-      set(id, 'fill-extrusion-color', ['interpolate', ['linear'], ['coalesce', ['get', 'render_height'], 0], 0, P.building3d, 18, P.building3d, 60, P.building3dTall]);
-      set(id, 'fill-extrusion-opacity', 0.94);
+      // Gerçek yükseklikler (OSM kat bilgisi). Renk: binalar arasında hafif ton farkı + yükseldikçe bir ton koyulaşma
+      const h = ['coalesce', ['get', 'render_height'], 0];
+      const tone = ['match', ['%', ['round', h], 3], 0, P.bTones[0], 1, P.bTones[1], P.bTones[2]];
+      set(id, 'fill-extrusion-color', ['interpolate', ['linear'], h, 0, tone, 20, tone, 60, P.building3dTall]);
+      set(id, 'fill-extrusion-opacity', ['interpolate', ['linear'], ['zoom'], 15.3, 0, 16, 0.96]);
       set(id, 'fill-extrusion-vertical-gradient', true);
-      set(id, 'fill-extrusion-height', ['interpolate', ['linear'], ['zoom'], 15, 0, 16, ['coalesce', ['get', 'render_height'], 6]]);
-      set(id, 'fill-extrusion-base', ['interpolate', ['linear'], ['zoom'], 15, 0, 16, ['coalesce', ['get', 'render_min_height'], 0]]);
+      set(id, 'fill-extrusion-height', ['interpolate', ['linear'], ['zoom'], 15.3, 0, 16.2, ['coalesce', ['get', 'render_height'], 6]]);
+      set(id, 'fill-extrusion-base', ['interpolate', ['linear'], ['zoom'], 15.3, 0, 16.2, ['coalesce', ['get', 'render_min_height'], 0]]);
       continue;
     }
     if (l.type === 'line') {
@@ -160,6 +179,11 @@ export function applyPalette(map, P, opts = {}) {
   }
   vis('yolcu-sat', sat);
   vis('yolcu-hillshade', !sat);
+  vis('yolcu-poi', !nav);
+  set('yolcu-poi', 'text-color', sat ? '#FFFFFF' : P.poiLabel);
+  set('yolcu-poi', 'text-halo-color', sat ? 'rgba(0,0,0,.7)' : P.halo);
+  // Uyduda eğik bakışta ufuk bulanıklaşmasın: eğimi sınırla
+  try { map.setMaxPitch(sat ? 55 : 75); } catch { }
   set('yolcu-hillshade', 'hillshade-shadow-color', P.shade);
   set('yolcu-hillshade', 'hillshade-highlight-color', P.highlight);
   set('yolcu-hillshade', 'hillshade-exaggeration', P.shadeK);

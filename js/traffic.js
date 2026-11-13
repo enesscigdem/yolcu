@@ -82,6 +82,29 @@ export async function routeTraffic(key, route, signal) {
   };
 }
 
+// Tek istekte canlı trafikli süre (karşılama kartı ve favoriler için)
+export async function quickEta(key, from, to, signal) {
+  const url = `${API}/routing/1/calculateRoute/${from.lat},${from.lon}:${to.lat},${to.lon}/json?key=${encodeURIComponent(key)}`
+    + '&traffic=true&routeType=fastest&travelMode=car&routeRepresentation=summaryOnly';
+  const r = await fetch(url, { signal });
+  if (!r.ok) throw new Error('Süre ' + r.status);
+  const s = (await r.json()).routes?.[0]?.summary;
+  if (!s) throw new Error('Süre boş');
+  return { time: s.travelTimeInSeconds, delay: s.trafficDelayInSeconds || 0, lengthM: s.lengthInMeters };
+}
+
+// Kategoriye göre yakındaki mekanlar (benzinlik, otopark, kafe, market)
+export async function nearby(key, categorySet, near, radius, signal) {
+  const params = new URLSearchParams({ key, lat: near.lat.toFixed(5), lon: near.lon.toFixed(5), radius: String(radius), categorySet, limit: '25', language: 'tr-TR' });
+  const r = await fetch(`${API}/search/2/nearbySearch/.json?${params}`, { signal });
+  if (!r.ok) throw new Error('Yakındakiler ' + r.status);
+  const j = await r.json();
+  return (j.results || []).map(x => {
+    const a = x.address || {};
+    return { name: x.poi?.name || 'Mekan', sub: [[a.streetName, a.streetNumber].filter(Boolean).join(' No:'), a.municipalitySubdivision].filter(Boolean).join(', '), lat: x.position.lat, lon: x.position.lon };
+  });
+}
+
 // İşletme / adres arama (OpenStreetMap'te olmayan dükkan ve ofisleri de bulur)
 export async function search(key, q, near, signal) {
   const params = new URLSearchParams({ key, countrySet: 'TR', language: 'tr-TR', limit: '10', typeahead: 'true' });

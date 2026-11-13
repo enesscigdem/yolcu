@@ -1,10 +1,10 @@
 // Yolcu service worker: uygulama dosyalarını önbelleğe alır, internet yokken de açılır
-const VERSION = 'yolcu-v6';
+const VERSION = 'yolcu-v7';
 const SHELL = [
   './', 'index.html', 'app.css', 'manifest.webmanifest',
   'js/app.js', 'js/api.js', 'js/geo.js', 'js/guide.js', 'js/icons.js', 'js/mapstyle.js', 'js/nav.js', 'js/store.js',
   'js/traffic.js', 'js/radar.js', 'data/radars-tr.json',
-  'icons/mavi-180.png', 'icons/yol-180.png', 'icons/harita-180.png', 'icons/gece-180.png', 'icons/y-180.png'
+  'icons/komur-180.png', 'icons/mavi-180.png', 'icons/yol-180.png', 'icons/harita-180.png', 'icons/gece-180.png', 'icons/y-180.png'
 ];
 const CDN = ['https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js', 'https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css'];
 

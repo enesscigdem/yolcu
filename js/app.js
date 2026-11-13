@@ -13,7 +13,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const IZMIR = { lon: 27.142, lat: 38.423 };
 const EMPTY = { type: 'FeatureCollection', features: [] };
 const wide = () => window.innerWidth >= 700;
-const ICONS = { mavi: 'Mavi Ok', yol: 'Gün Batımı', harita: 'Harita', gece: 'Gece', y: 'Y Ayrımı' };
+const ICONS = { komur: 'Kömür', mavi: 'Mavi Ok', yol: 'Gün Batımı', harita: 'Harita', gece: 'Gece', y: 'Y Ayrımı' };
 const TRAVEL = { auto: ['Araba', 'car'], pedestrian: ['Yürüyüş', 'walk'] };
 
 // Eski sürümden gelen ayarları güncelle
@@ -34,10 +34,30 @@ const S = {
   where: null, whereAt: null, whereBusy: false, wake: null, arrowFor: -1, arrived: false,
   dragEnd: 0, autoStart: false, chips: [], incidents: [], incAt: null, navInc: [], said: new Set(),
   trafRatio: null, timers: [], navIntro: null, incident: null,
-  cams: [], official: [], navCams: [], weather: null, weatherAt: null
+  cams: [], official: [], navCams: [], weather: null, weatherAt: null,
+  eta: {}, helloK: null, trip: null, prog: null, lastView: null
 };
 const key = () => store.tomtomKey;
-const theme = () => { const p = store.prefs.theme; return p === 'auto' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : p; };
+// "Otomatik" tema gün doğumu / batımına göre (hava servisinden); bilinmiyorsa telefonun ayarı
+const theme = () => {
+  const p = store.prefs.theme;
+  if (p !== 'auto') return p;
+  const w = S.weather;
+  if (w?.sunrise && w?.sunset) { const now = Date.now(); return now >= w.sunrise && now < w.sunset ? 'light' : 'dark'; }
+  return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+};
+
+// Açılış: harita şehrin üstünden yumuşakça konumuna süzülür ve eğilir
+function introFly(p) {
+  const m = S.map;
+  const tilt = store.prefs.tilt;
+  m.jumpTo({ center: [p.lon, p.lat], zoom: 11.6, pitch: 0, bearing: 0 });
+  requestAnimationFrame(() => m.flyTo({
+    center: [p.lon, p.lat], zoom: tilt ? 16.3 : 15.6, pitch: tilt ? 56 : 30, bearing: -18,
+    duration: 2600, curve: 1.25, essential: true,
+    padding: { top: 0, bottom: wide() ? 0 : sheet.visible() * 0.5, left: wide() ? 420 : 0, right: 0 }
+  }));
+}
 
 /* ================= iOS ekran boyu ================= */
 // iOS 26 ana ekran uygulamasında görünüm, durum çubuğu kadar kısa geliyor (WebKit 301108).
@@ -219,8 +239,15 @@ const GLYPH = {
   warn: 'M12 3.2c.5 0 1 .3 1.2.7l8.4 15c.5.9-.2 2.1-1.2 2.1H3.6c-1 0-1.7-1.2-1.2-2.1l8.4-15c.2-.4.7-.7 1.2-.7zM11 9.5v5h2v-5zm0 6.5v2h2v-2z',
   cone: 'M10.2 3h3.6l1.3 4.5H8.9zM8.5 9h7l1.1 4H7.4zM7 14.5h10l1.2 4.5H5.8zM3 20h18v1.5H3z',
   closed: 'M12 2.5a9.5 9.5 0 1 1 0 19 9.5 9.5 0 0 1 0-19zM6.5 10.4v3.2h11v-3.2z',
-  car: 'M5.6 6.3A2.5 2.5 0 0 1 8 4.5h8a2.5 2.5 0 0 1 2.4 1.8L19.8 11H20a2 2 0 0 1 2 2v4.5a1 1 0 0 1-1 1h-1V20a1 1 0 0 1-1 1h-1.5a1 1 0 0 1-1-1v-1.5h-9V20a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1.5H3a1 1 0 0 1-1-1V13a2 2 0 0 1 2-2h.2zM7.6 7 6.5 11h11l-1.1-4a.8.8 0 0 0-.8-.5H8.4a.8.8 0 0 0-.8.5z'
+  car: 'M5.6 6.3A2.5 2.5 0 0 1 8 4.5h8a2.5 2.5 0 0 1 2.4 1.8L19.8 11H20a2 2 0 0 1 2 2v4.5a1 1 0 0 1-1 1h-1V20a1 1 0 0 1-1 1h-1.5a1 1 0 0 1-1-1v-1.5h-9V20a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1.5H3a1 1 0 0 1-1-1V13a2 2 0 0 1 2-2h.2zM7.6 7 6.5 11h11l-1.1-4a.8.8 0 0 0-.8-.5H8.4a.8.8 0 0 0-.8.5z',
+  // Harita mekan simgeleri
+  pharmacy: 'M9.3 3h5.4v6.3H21v5.4h-6.3V21H9.3v-6.3H3V9.3h6.3z',
+  hospital: 'M6 4h3v6.5h6V4h3v16h-3v-6.5H9V20H6z',
+  fuel: 'M5 4.5A1.5 1.5 0 0 1 6.5 3h6A1.5 1.5 0 0 1 14 4.5V11h1a2 2 0 0 1 2 2v4a1 1 0 0 0 2 0V9.4l-2-2 1.4-1.4 2.6 2.6V17a3 3 0 0 1-6 0v-4h-1v7.5H5zM7 5v5h5V5z',
+  parking: 'M6 3h7a6 6 0 0 1 0 12h-3v6H6zm4 4v4h3a2 2 0 0 0 0-4z',
+  railway: 'M7 3h10a3 3 0 0 1 3 3v9a3 3 0 0 1-2.2 2.9L19.5 21h-2.3l-1.4-3H8.2l-1.4 3H4.5l1.7-3.1A3 3 0 0 1 4 15V6a3 3 0 0 1 3-3zm0 3v4h10V6zm1 7a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm8 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z'
 };
+const POI_COLOR = { pharmacy: '#FF6B60', hospital: '#FF6B60', fuel: '#E6E6E8', parking: '#8FB4FF', railway: '#E6E6E8' };
 const INC_GLYPH = { 1: 'warn', 6: 'car', 7: 'cone', 8: 'closed', 9: 'cone', 14: 'car' };
 const incGlyph = i => INC_GLYPH[i.cat] || 'warn';
 const incColor = i => (i.cat === 8 || i.cat === 1 || i.mag >= 3 ? '#FF453A' : '#FF9F0A');
@@ -256,16 +283,20 @@ async function initMap() {
     S.mapReady = true;
     applyTheme();
     $('map').classList.add('ready');
-    if (S.pos) { S.firstFix = false; map.jumpTo({ center: [S.pos.lon, S.pos.lat], zoom: store.prefs.tilt ? 16.4 : 15.5, pitch: store.prefs.tilt ? 58 : 0 }); updatePuck(S.pos); }
+    if (S.pos) { S.firstFix = false; updatePuck(S.pos); introFly(S.pos); }
     loadIncidents();
     drawRadars();
   });
-  map.on('styleimagemissing', () => { });
+  // Mekan simgeleri ilk ihtiyaç anında çizilir (koyu daire + tek renkli sembol)
+  map.on('styleimagemissing', e => {
+    const m = /^poi-(\w+)$/.exec(e.id);
+    if (m && GLYPH[m[1]] && !map.hasImage(e.id)) map.addImage(e.id, glyphImage(m[1], POI_COLOR[m[1]] || '#E6E6E8', 'rgba(255,255,255,.18)'), { pixelRatio: 2 });
+  });
   map.on('dragstart', () => {
     if (S.nav) { S.follow = false; $('nav-recenter').hidden = false; $('nav-street').hidden = true; }
   });
   // Navigasyonda konum oku kamerayla birlikte akıcı kaysın (GPS adımları arasında zıplamasın)
-  map.on('move', () => { if (S.nav && S.follow && S.puck) S.puck.setLngLat(map.getCenter()); });
+  map.on('move', () => { if (S.nav && S.follow && S.puck && !S.arrived) puckAt(map.getCenter()); });
   map.on('rotate', () => updateLocateBtn());
   map.on('pitchend', () => updateTiltBtn());
   map.on('moveend', () => { clearTimeout(S.incT); S.incT = setTimeout(() => { loadIncidents(); if (!S.nav) drawRadars(); }, 900); });
@@ -400,7 +431,8 @@ function setFlow() {
   if (!m || !S.mapReady) return;
   for (const id of FLOW_LAYERS) if (m.getLayer(id)) m.removeLayer(id);
   if (m.getSource('tt-flow')) m.removeSource('tt-flow');
-  if (!key() || !store.prefs.traffic) return;
+  // Navigasyonda şehrin tamamını boyama: sadece rotadaki sıkışıklıklar (yolcu-jams) görünür
+  if (!key() || !store.prefs.traffic || S.nav) return;
   m.addSource('tt-flow', { type: 'vector', tiles: [traffic.flowTiles(key())], maxzoom: 22, attribution: '© TomTom' });
   const lvl = ['to-number', ['get', 'traffic_level'], 1];
   const closed = ['==', ['get', 'road_closure'], true];
@@ -491,16 +523,43 @@ async function loadRadars(p) {
 async function updateWeather(p) {
   if (S.weatherAt && Date.now() - S.weatherAt < 30 * 60e3) return;
   S.weatherAt = Date.now();
-  try { S.weather = await api.weather(p.lat, p.lon); renderWherePill(); }
+  try { S.weather = await api.weather(p.lat, p.lon); renderWherePill(); checkTheme(); }
   catch { S.weatherAt = null; }
 }
+// Tema değiştiyse (gün battı / doğdu) haritayı yeniden boya
+function checkTheme() { if (document.documentElement.dataset.map !== theme()) applyTheme(); }
 
-/* ---------- Yol adı rozetleri ---------- */
+/* ---------- Haritada rota balonları ve yol adı rozetleri ---------- */
 function clearChips() { S.chips.forEach(m => m.remove()); S.chips = []; }
+// Alternatif rotanın, seçili rotadan en çok ayrıldığı nokta (balon oraya konur)
+function divergePoint(r, base) {
+  let best = null, bd = -1;
+  for (let s = 1; s < 24; s++) {
+    const p = pointAt(r.coords, r.cum, r.lengthM * s / 24);
+    let d = Infinity;
+    for (let i = 0; i < base.coords.length; i += 3) { const c = base.coords[i]; const x = dist(p.lon, p.lat, c[0], c[1]); if (x < d) d = x; }
+    if (d > bd) { bd = d; best = p; }
+  }
+  return best;
+}
 function drawChips(route) {
   clearChips();
-  if (!route?.story || !S.map) return;
-  const roads = route.story.filter(s => s.kind === 'road').sort((a, b) => b.m - a.m).slice(0, 3);
+  if (!S.map) return;
+  const best = S.routes[0];
+  // Süre balonları: seçili rota vurgulu, alternatifler "+11 dk"; dokununca o rota seçilir
+  S.routes.forEach((r, i) => {
+    const sel = i === S.sel;
+    const p = sel ? pointAt(r.coords, r.cum, r.lengthM * 0.55) : divergePoint(r, route);
+    if (!p) return;
+    const el = document.createElement('div');
+    el.className = `rt-bubble${sel ? ' sel' : ''}`;
+    const diff = Math.round((rtime(r) - rtime(best)) / 60);
+    el.innerHTML = sel ? `${Math.max(1, Math.round(rtime(r) / 60))} dk` : `${Math.max(1, Math.round(rtime(r) / 60))} dk<small>${diff > 0 ? '+' + diff : diff}</small>`;
+    el.addEventListener('click', ev => { ev.stopPropagation(); selectRoute(i); });
+    S.chips.push(new maplibregl.Marker({ element: el, anchor: 'bottom', offset: [0, -6] }).setLngLat([p.lon, p.lat]).addTo(S.map));
+  });
+  if (!route?.story) return;
+  const roads = route.story.filter(s => s.kind === 'road').sort((a, b) => b.m - a.m).slice(0, 2);
   for (const s of roads) {
     const mid = (route.cum[Math.min(s.b, route.cum.length - 1)] + route.cum[Math.min(s.e, route.cum.length - 1)]) / 2;
     const p = pointAt(route.coords, route.cum, mid);
@@ -511,21 +570,83 @@ function drawChips(route) {
   }
 }
 
+/* ---------- Haritada zaten yüklü mekanlardan kategori araması (anında) ---------- */
+function tileNearby(cat) {
+  if (!S.map) return [];
+  let feats = [];
+  try { feats = S.map.querySourceFeatures('openmaptiles', { sourceLayer: 'poi', filter: ['match', ['get', 'class'], cat.tiles, true, false] }); } catch { return []; }
+  return feats.filter(f => f.geometry?.type === 'Point').map(f => {
+    const pr = f.properties || {};
+    const [lon, lat] = f.geometry.coordinates;
+    return { name: pr['name:tr'] || pr.name || cat.fallback, sub: pr.subclass && pr.subclass !== pr.class ? '' : '', lat, lon };
+  });
+}
+
+/* ---------- Akıllı karşılama ve favori süreleri ---------- */
+// Sabah işe, akşam eve; evdeysen işe, işteysen eve. Süre trafikli (TomTom) ya da tahmini.
+function helloTarget() {
+  const p = S.pos;
+  if (!p || (!store.home && !store.work)) return null;
+  const near = q => q && dist(p.lon, p.lat, q.lon, q.lat) < 600;
+  if (near(store.home) && store.work) return 'work';
+  if (near(store.work) && store.home) return 'home';
+  const h = new Date().getHours();
+  const k = h >= 4 && h < 13 ? 'work' : 'home';
+  if (store[k] && dist(p.lon, p.lat, store[k].lon, store[k].lat) > 600) return k;
+  const o = k === 'work' ? 'home' : 'work';
+  return store[o] && dist(p.lon, p.lat, store[o].lon, store[o].lat) > 600 ? o : null;
+}
+async function etaTo(k) {
+  const p = S.pos, dst = store[k];
+  if (!p || !dst) return null;
+  const c = S.eta[k];
+  if (c && Date.now() - c.at < 4 * 60e3 && dist(p.lon, p.lat, c.lon, c.lat) < 400) return c;
+  let r;
+  if (key()) { try { r = await traffic.quickEta(key(), p, dst); } catch { } }
+  if (!r) { try { const v = await api.quickRoute(p, dst, store.prefs); r = { time: v.time * 0.85, delay: null, lengthM: v.lengthM }; } catch { return null; } }
+  S.eta[k] = { ...r, at: Date.now(), lon: p.lon, lat: p.lat };
+  return S.eta[k];
+}
+async function refreshHello() {
+  if (S.helloBusy || S.nav || !S.pos) return;
+  if (S.helloAt && Date.now() - S.helloAt < 60e3) return;
+  S.helloBusy = true; S.helloAt = Date.now();
+  try {
+    S.helloK = helloTarget();
+    await Promise.all(['work', 'home'].filter(k => store[k]).map(etaTo));
+    if (S.view === 'home' && !S.nav) { const sc = sheet.body.scrollTop; render(); sheet.body.scrollTop = sc; if (sheet.detent === 'peek') sheet.set('peek'); }
+  } finally { S.helloBusy = false; }
+}
+function greeting() {
+  const h = new Date().getHours();
+  return h < 5 ? 'İyi geceler' : h < 12 ? 'Günaydın' : h < 18 ? 'İyi günler' : h < 22 ? 'İyi akşamlar' : 'İyi geceler';
+}
+
 /* ================= Konum ================= */
+// Konum işareti iki parça: yerde yatan nefes alan hale (eğik bakışta doğal elips olur)
+// ve üstünde her açıdan dik duran nokta / navigasyon oku (artık ezik görünmez)
+function puckAt(lngLat) { S.puck?.setLngLat(lngLat); S.puckGround?.setLngLat(lngLat); }
 function updatePuck(p) {
   if (!S.mapReady) return;
   if (!S.puck) {
+    const g = document.createElement('div');
+    g.className = 'puck-ground';
+    S.puckGround = new maplibregl.Marker({ element: g, rotationAlignment: 'map', pitchAlignment: 'map' }).setLngLat([p.lon, p.lat]).addTo(S.map);
     const el = document.createElement('div');
     el.className = 'puck';
-    el.innerHTML = `<div class="puck-halo"></div><div class="puck-cone"></div><div class="puck-dot"></div><div class="puck-arrow">${NAV_ARROW}</div>`;
-    S.puck = new maplibregl.Marker({ element: el, rotationAlignment: 'map', pitchAlignment: 'map' }).setLngLat([p.lon, p.lat]).addTo(S.map);
+    el.innerHTML = `<div class="puck-cone"></div><div class="puck-dot"></div><div class="puck-arrow">${NAV_ARROW}</div>`;
+    S.puck = new maplibregl.Marker({ element: el, rotationAlignment: 'map', pitchAlignment: 'viewport' }).setLngLat([p.lon, p.lat]).addTo(S.map);
   }
   if (!S.nav) {
-    S.puck.setLngLat([p.lon, p.lat]);
+    puckAt([p.lon, p.lat]);
     const hasH = p.heading != null && p.speed > 0.8;
     S.puck.getElement().classList.toggle('has-heading', hasH);
     if (hasH) S.puck.setRotation(p.heading);
   }
+}
+function setPuckNav(on) {
+  S.puck?.getElement().classList.toggle('nav', on);
+  S.puckGround?.getElement().classList.toggle('nav', on);
 }
 
 function onPos(p) {
@@ -541,7 +662,8 @@ function onPos(p) {
   S.pos = p;
   updatePuck(p);
   if (first) { updateLocateBtn(); loadRadars(p); updateWeather(p); }
-  if (S.firstFix && S.mapReady && !S.nav) { S.firstFix = false; S.map.jumpTo({ center: [p.lon, p.lat], zoom: store.prefs.tilt ? 16.4 : 15.5, pitch: store.prefs.tilt ? 58 : 0 }); }
+  if (S.firstFix && S.mapReady && !S.nav) { S.firstFix = false; introFly(p); }
+  if (!S.nav) refreshHello();
   if (S.nav) navTick(p);
   else {
     updateWhere(p);
@@ -625,7 +747,8 @@ function prefsList(travel = 'auto') {
 function viewHome() {
   const fav = (k, label, icon) => {
     const p = store[k];
-    const sub = p ? (distFromMe(p) || 'Git') : 'Ekle';
+    const e = S.eta[k];
+    const sub = p ? (e ? `${Math.max(1, Math.round(e.time / 60))} dk` : (distFromMe(p) || 'Git')) : 'Ekle';
     return `<button class="fav" data-act="fav" data-k="${k}"><span class="fav-icon k-${k}">${I[icon]}</span><span class="fav-title">${label}</span><span class="fav-sub">${sub}</span></button>`;
   };
   const places = store.places.map((p, i) => {
@@ -639,13 +762,35 @@ function viewHome() {
     ? `<div class="list">${store.recents.slice(0, 6).map((p, i) => placeRow(p, 'recent', i, 'recent')).join('')}</div>`
     : `<div class="list"><div class="empty">Gittiğin yerler burada görünecek.</div></div>`;
   const ttHint = !key() ? `<button class="tip" data-act="openSettings"><span class="row-icon c-orange">${I.warn}</span><span class="t"><b>Trafik bilgisi kapalı</b><small>Açmak için dokun</small></span>${I.chevron}</button>` : '';
+  // Akıllı karşılama: günün saatine ve nerede olduğuna göre tek dokunuşla yola çık
+  let hello = '';
+  const hk = !resume && S.helloK;
+  if (hk) {
+    const e = S.eta[hk];
+    const label = hk === 'work' ? 'İşe' : 'Eve';
+    const min = e ? Math.max(1, Math.round(e.time / 60)) : null;
+    const dm = e?.delay != null ? Math.round(e.delay / 60) : null;
+    const eta = e ? G.fmtClock(new Date(Date.now() + e.time * 1000)) : '';
+    const sub = !e ? 'Süre hesaplanıyor…'
+      : dm == null ? `${eta} varış · tahmini`
+        : dm >= 2 ? `Trafikte +${dm} dk · ${eta} varış` : `Trafik akıcı · ${eta} varış`;
+    const dot = dm == null ? '' : dm >= 6 ? 'bad' : dm >= 2 ? 'warn' : '';
+    hello = `<div class="hello${e ? '' : ' loading'}" data-act="helloOpen" data-k="${hk}" data-peek>
+      <div class="hello-main">
+        <div class="hello-eyebrow">${greeting()}</div>
+        <div class="hello-title">${label} <em>${min ? `${min} dk` : '…'}</em></div>
+        <div class="hello-sub">${e && dm != null ? `<span class="dot ${dot}"></span>` : ''}${esc(sub)}</div>
+      </div>
+      <button class="go" data-act="helloGo" data-k="${hk}">GİT</button>
+    </div>`;
+  }
   return `
     <div class="search-row">
       <button class="searchbar" data-act="openSearch">${I.search}<span>Nereye?</span></button>
       <button class="icon-btn" data-act="openSettings" aria-label="Ayarlar">${I.gear}</button>
     </div>
-    ${resume}
-    <div class="favs" data-peek>
+    ${resume}${hello}
+    <div class="favs" ${hello ? '' : 'data-peek'}>
       ${fav('work', 'İş', 'work')}
       ${fav('home', 'Ev', 'home')}
       ${places}
@@ -670,6 +815,7 @@ function viewSearch() {
       <button class="link" data-act="cancelSearch">Vazgeç</button>
     </div>
     ${hint}
+    ${S.pickFor ? '' : `<div class="cats">${api.CATEGORIES.map(c => `<button class="cat" data-act="cat" data-v="${c.id}">${I[KIND_ICON[c.kind]?.[0] || 'pin']}${c.label}</button>`).join('')}</div>`}
     <div id="results">${resultsHtml(S.results)}</div>`;
 }
 
@@ -737,6 +883,35 @@ function fmtTime(sec) {
 }
 
 // Kartta sadece en önemli 1-2 not; geri kalan her şey "Detaylar"da
+// Rota şeridi: rotanın uzunluğu boyunca ana yol kısımları ve trafik (yavaş / sıkışık) nerede
+function alongOf(r, pt) {
+  let best = { d: Infinity, a: 0 };
+  for (let i = 0; i < r.coords.length - 1; i += 1) {
+    const a = r.coords[i], b = r.coords[i + 1];
+    const d = dist(pt[0], pt[1], a[0], a[1]);
+    if (d < best.d) best = { d, a: r.cum[i] };
+    if (i === r.coords.length - 2) { const d2 = dist(pt[0], pt[1], b[0], b[1]); if (d2 < best.d) best = { d: d2, a: r.cum[i + 1] }; }
+  }
+  return best.d < 120 ? best.a : null;
+}
+function routeStrip(r) {
+  if (r._strip != null) return r._strip;
+  const L = r.lengthM || 1;
+  const seg = (a, b, cls) => `<i class="${cls}" style="left:${(a / L * 100).toFixed(2)}%;width:${Math.max(0.8, (b - a) / L * 100).toFixed(2)}%"></i>`;
+  let html = '';
+  for (const s of r.story || []) {
+    if (s.kind !== 'road' || !['motorway', 'trunk', 'primary', 'secondary'].includes(s.cls)) continue;
+    html += seg(r.cum[Math.min(s.b, r.cum.length - 1)], r.cum[Math.min(s.e, r.cum.length - 1)], 'main');
+  }
+  for (const j of r.jams || []) {
+    const a = alongOf(r, j.coords[0]), b = alongOf(r, j.coords[j.coords.length - 1]);
+    if (a == null || b == null || b <= a) continue;
+    html += seg(a, b, j.mag >= 2 ? 'jam' : 'slow');
+  }
+  r._strip = html ? `<div class="strip">${html}</div>` : '';
+  return r._strip;
+}
+
 function routeNotes(r) {
   const n = [];
   if (r.best) n.push(['Önerilen', 'best']);
@@ -808,6 +983,7 @@ function viewRoutes() {
             <div class="rt-sub">${eta} varış · ${G.fmtDist(r.lengthM)}</div>
             ${via ? `<div class="rt-via">${esc(via)}</div>` : ''}
             ${notes ? `<div class="notes">${notes}</div>` : ''}
+            ${r.mode === 'auto' ? routeStrip(r) : ''}
           </div>
           ${sel ? `<button class="go" data-act="go" data-i="${i}">GİT</button>` : ''}
         </div>
@@ -868,6 +1044,13 @@ function render() {
   const v = { home: viewHome, search: viewSearch, place: viewPlace, routes: viewRoutes, where: viewWhere, incident: viewIncident }[S.view];
   if (S.view === 'search' && $('q')) { $('results').innerHTML = resultsHtml(S.results); return; }
   sheet.body.innerHTML = v();
+  // Görünüm değiştiyse içerik yumuşakça belirsin
+  if (S.lastView !== S.view) {
+    S.lastView = S.view;
+    const b = sheet.body;
+    b.classList.remove('enter'); void b.offsetWidth; b.classList.add('enter');
+    clearTimeout(S.enterT); S.enterT = setTimeout(() => b.classList.remove('enter'), 500);
+  }
 }
 
 function goHome() {
@@ -923,6 +1106,7 @@ function choosePlace(p) {
   if (S.pickFor === 'home' || S.pickFor === 'work') {
     store[S.pickFor] = { name: p.name, sub: p.sub, lat: p.lat, lon: p.lon, kind: S.pickFor };
     save();
+    S.helloAt = null; S.eta = {};
     toast(S.pickFor === 'home' ? 'Ev kaydedildi' : 'İş kaydedildi');
     goHome();
     return;
@@ -1035,6 +1219,10 @@ function startNav(i, simulate = false) {
   S.follow = true; S.arrowFor = -1; S.arrived = false; S.bannerFor = null;
   S.navInc = []; S.said = new Set(); S.trafRatio = route.trafficRatio || null;
   S.navCams = route.mode === 'auto' ? routeCams(route) : [];
+  S.trip = { t0: Date.now(), m: 0, last: null };
+  S.prog = null;
+  $('arrive').hidden = true;
+  document.body.classList.remove('arrived');
   const eta = G.fmtClock(new Date(Date.now() + rtime(route) * 1000));
   S.navIntro = [G.storyShort(route.story), `Tahmini varış ${eta}.`].filter(Boolean).join(' ');
   document.body.classList.add('navigating');
@@ -1046,7 +1234,7 @@ function startNav(i, simulate = false) {
   $('nav-bottom').classList.toggle('walk', route.mode !== 'auto');
   updateMuteBtn();
   $('nav-overview').innerHTML = I.route;
-  S.puck?.getElement().classList.add('nav');
+  setPuckNav(true);
   clearChips();
   setRoutesData([line(route.coords, { i: 0, sel: true })]);
   setJams(route.jams);
@@ -1060,11 +1248,12 @@ function startNav(i, simulate = false) {
     S.timers.push(setInterval(refreshNavIncidents, 120000));
     S.timers.push(setInterval(refreshNavTraffic, 300000));
   }
+  $('nav-status').hidden = true;
   if (simulate) {
     S.sim = new Simulator(route, p => { onPos(p); }, 3);
     showSimStatus();
   } else {
-    $('nav-status').hidden = true;
+    $('sim-badge').hidden = true;
     if (S.pos) navTick(S.pos);
   }
 }
@@ -1092,11 +1281,11 @@ async function refreshNavTraffic() {
   } catch { }
 }
 
+// Önizleme (simülasyon) bilgisi altta küçük bir rozet; üst kartı kalabalıklaştırmaz
 function showSimStatus() {
-  const s = $('nav-status');
-  s.hidden = false; s.className = 'nav-status';
-  s.dataset.act = 'simSpeed';
-  s.textContent = `Önizleme · ${S.sim.factor}× (dokun: hız)`;
+  const b = $('sim-badge');
+  b.hidden = false;
+  b.textContent = `Önizleme · ${S.sim.factor}×`;
 }
 
 function navPadding() {
@@ -1130,6 +1319,10 @@ function renderBanner(st) {
     $('nav-road').innerHTML = road;
   }
   $('nav-dist').textContent = G.fmtDist(st.distToNext);
+  // Dönüşe yaklaştıkça dolan ince çizgi (son 800 m)
+  if (!S.prog || S.prog.idx !== st.upIdx) S.prog = { idx: st.upIdx, start: Math.max(60, Math.min(800, st.distToNext)) };
+  const pr = Math.max(0, Math.min(1, 1 - st.distToNext / S.prog.start));
+  $('nav-prog').style.width = `${(pr * 100).toFixed(1)}%`;
   const th = $('nav-then');
   if (st.then && st.gap < 400 && st.distToNext < 1200) {
     th.hidden = false;
@@ -1148,14 +1341,19 @@ function setKm(m) {
 }
 
 function navTick(p) {
-  if (!S.nav) return;
+  if (!S.nav || S.arrived) return;
   const st = S.nav.update(p);
   const r = S.navRoute;
   const walk = r.mode !== 'auto';
   const onRoute = st.snapped.d < 30;
   const pp = onRoute ? st.snapped : p;
   const hd = p.speed > (walk ? 0.8 : 2) && p.heading != null ? p.heading : st.routeBearing;
-  if (S.puck) { if (!S.follow) S.puck.setLngLat([pp.lon, pp.lat]); S.puck.setRotation(hd); }
+  if (S.puck) { if (!S.follow) puckAt([pp.lon, pp.lat]); S.puck.setRotation(hd); }
+  // Yolculuk özeti için gerçekten gidilen mesafe
+  if (S.trip) {
+    if (S.trip.last) { const d = dist(S.trip.last.lon, S.trip.last.lat, p.lon, p.lat); if (d < 300) S.trip.m += d; }
+    S.trip.last = { lon: p.lon, lat: p.lat };
+  }
 
   setRoutesData([line(sliceAlong(r.coords, r.cum, st.along, st.total), { i: 0, sel: true })]);
   if (st.upIdx !== S.arrowFor) { S.arrowFor = st.upIdx; maneuverArrow(st.up); }
@@ -1252,7 +1450,8 @@ async function doReroute(p) {
     toast('Yeni rota alınamadı, tekrar denenecek');
   } finally {
     S.rerouting = false;
-    if (S.sim) showSimStatus(); else s.hidden = true;
+    s.hidden = true;
+    if (S.sim) showSimStatus();
   }
 }
 
@@ -1266,8 +1465,29 @@ function arrive() {
   $('nav-road').innerHTML = '';
   $('nav-then').hidden = true;
   $('nav-alert').hidden = true;
+  $('nav-prog').style.width = '100%';
   S.sim?.stop();
-  setTimeout(() => { if (S.nav) endNav(); }, 4000);
+  closeNavMenu();
+  // Varış özeti: ne zaman vardın, ne kadar sürdü, kaç km, ortalama hız
+  const tr = S.trip || { t0: Date.now(), m: 0 };
+  const secs = Math.max(60, (Date.now() - tr.t0) / 1000);
+  const meters = tr.m > 200 ? tr.m : (S.navRoute?.lengthM || 0);
+  const avg = Math.round((meters / secs) * 3.6);
+  const a = $('arrive');
+  a.innerHTML = `
+    <div class="arrive-flag">${I.check}</div>
+    <h2>${esc(S.dest?.name === 'Ev' ? 'Eve vardın' : S.dest?.name === 'İş' ? 'İşe vardın' : 'Vardın')}</h2>
+    <p>${esc(S.dest?.name && S.dest.name !== 'Ev' && S.dest.name !== 'İş' ? S.dest.name + ' · ' : '')}${G.fmtClock(new Date())}</p>
+    <div class="arrive-stats">
+      <div><b>${G.fmtDur(secs)}</b><small>süre</small></div>
+      <div><b>${G.fmtDist(meters)}</b><small>mesafe</small></div>
+      <div><b>${avg}</b><small>ort. km/sa</small></div>
+    </div>
+    <button class="btn primary" data-act="endNav">Tamam</button>`;
+  a.hidden = false;
+  document.body.classList.add('arrived');
+  clearTimeout(S.arriveT);
+  S.arriveT = setTimeout(() => { if (S.nav && S.arrived) endNav(); }, 45000);
 }
 
 function endNav() {
@@ -1276,8 +1496,11 @@ function endNav() {
   S.timers.forEach(clearInterval); S.timers = [];
   document.body.classList.remove('navigating');
   closeNavMenu();
-  for (const id of ['nav', 'nav-side', 'nav-bottom', 'nav-recenter', 'nav-street']) $(id).hidden = true;
-  S.puck?.getElement().classList.remove('nav');
+  for (const id of ['nav', 'nav-side', 'nav-bottom', 'nav-recenter', 'nav-street', 'sim-badge', 'arrive']) $(id).hidden = true;
+  document.body.classList.remove('arrived');
+  clearTimeout(S.arriveT);
+  S.trip = null; S.arrived = false;
+  setPuckNav(false);
   keepAwake(false);
   voice.stop();
   store.activeNav = null; save();
@@ -1295,6 +1518,7 @@ function endNav() {
   render();
   sheet.set('peek');
   loadIncidents(true);
+  S.helloAt = null; S.eta = {}; refreshHello();
 }
 
 function updateMuteBtn() {
@@ -1404,7 +1628,7 @@ function renderSettings() {
 
 function applyIconLink() {
   const link = document.querySelector('link[rel=apple-touch-icon]');
-  if (link) link.href = `icons/${store.prefs.icon || 'mavi'}-180.png`;
+  if (link) link.href = `icons/${store.prefs.icon || 'komur'}-180.png`;
 }
 
 function setTilt(on) {
@@ -1427,6 +1651,50 @@ const ACT = {
     else { S.pickFor = k; openSearch(); }
   },
   favPlace: el => { const p = store.places[+el.dataset.i]; if (p) showPlace(p); },
+  helloOpen: (el, e) => {
+    if (e.target.closest('[data-act=helloGo]')) return;
+    const k = el.dataset.k; if (!store[k]) return;
+    openRoutes({ ...store[k], name: k === 'home' ? 'Ev' : 'İş', sub: store[k].name, kind: k });
+  },
+  helloGo: (el, e) => {
+    e.stopPropagation();
+    const k = el.dataset.k; if (!store[k]) return;
+    S.autoStart = true;
+    openRoutes({ ...store[k], name: k === 'home' ? 'Ev' : 'İş', sub: store[k].name, kind: k });
+  },
+  cat: async el => {
+    const c = api.CATEGORIES.find(x => x.id === el.dataset.v); if (!c) return;
+    document.querySelectorAll('.cat').forEach(b => b.classList.toggle('on', b === el));
+    const q = $('q'); if (q) q.value = '';
+    document.activeElement?.blur?.();
+    S.searchAbort?.abort();
+    S.results = 'loading'; render();
+    const center = S.pos || (S.map ? { lat: S.map.getCenter().lat, lon: S.map.getCenter().lng } : IZMIR);
+    const token = S.catToken = {};
+    const show = list => {
+      if (S.catToken !== token || S.view !== 'search') return;
+      // Aynı yer (harita karoları üst üste biner; TomTom ile harita aynı yeri iki kez verebilir) tek satır olsun
+      const kept = [];
+      const items = list.map(p => ({ ...p, kind: c.kind, _d: dist(center.lon, center.lat, p.lon, p.lat) }))
+        .filter(p => p._d < 15000)
+        .sort((a, b) => (a.name === c.fallback) - (b.name === c.fallback) || a._d - b._d);
+      for (const p of items) {
+        const dup = kept.some(q => { const d = dist(q.lon, q.lat, p.lon, p.lat); return (d < 150 && q.name === p.name) || (d < 60 && (p.name === c.fallback || q.name === c.fallback)); });
+        if (!dup) kept.push(p);
+      }
+      S.results = kept.sort((a, b) => a._d - b._d).slice(0, 15);
+      render();
+    };
+    // 1) Haritada yüklü mekanlar: anında
+    const tiles = tileNearby(c);
+    if (tiles.length) show(tiles);
+    // 2) TomTom kategori araması: hızlı
+    let tt = [];
+    if (key() && c.tt) tt = await traffic.nearby(key(), c.tt, center, c.r).catch(() => []);
+    if (tt.length || tiles.length) { show([...tiles, ...tt]); return; }
+    // 3) Son çare OpenStreetMap Overpass (yavaş olabilir)
+    try { show(await api.nearby(c, center)); } catch { if (S.catToken === token) { S.results = 'error'; render(); } }
+  },
   addPlace: () => { S.pickFor = 'place'; openSearch(); },
   clearRecents: () => { store.recents = []; save(); render(); },
   goHome: () => goHome(),
@@ -1624,7 +1892,10 @@ function boot() {
   voice.init();
   initMap();
   startGeo();
-  setInterval(() => { if (S.view === 'home' && !S.nav && sheet.detent === 'peek') { const sc = sheet.body.scrollTop; render(); sheet.body.scrollTop = sc; } }, 60000);
+  setInterval(() => {
+    checkTheme();
+    if (S.view === 'home' && !S.nav) { refreshHello(); if (sheet.detent === 'peek') { const sc = sheet.body.scrollTop; render(); sheet.body.scrollTop = sc; } }
+  }, 60000);
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
     navigator.serviceWorker.register('sw.js').catch(() => { });
   }
