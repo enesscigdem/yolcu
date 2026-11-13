@@ -309,8 +309,8 @@ function addLayers() {
   m.addImage('cam-osm', badgeImage('📷', '#0A84FF'), { pixelRatio: 2 });
   m.addImage('cam-user', badgeImage('📷', '#AF52DE'), { pixelRatio: 2 });
   m.addLayer({
-    id: 'yolcu-cams', type: 'symbol', source: 'yolcu-cams', minzoom: 12,
-    layout: { 'icon-image': ['get', 'img'], 'icon-allow-overlap': true, 'icon-size': ['interpolate', ['linear'], ['zoom'], 12, 0.5, 16, 0.85] }
+    id: 'yolcu-cams', type: 'symbol', source: 'yolcu-cams', minzoom: 13.5,
+    layout: { 'icon-image': ['get', 'img'], 'icon-allow-overlap': true, 'icon-size': ['interpolate', ['linear'], ['zoom'], 13.5, 0.5, 17, 0.85] }
   });
   m.addLayer({
     id: 'yolcu-inc', type: 'symbol', source: 'yolcu-inc', minzoom: 9,
@@ -362,19 +362,34 @@ function fitCoords(coords, opts = {}) {
 }
 
 /* ---------- Trafik katmanı ve olaylar ---------- */
+const FLOW_LAYERS = ['yolcu-flow-slow', 'yolcu-flow-jam', 'yolcu-flow-closed'];
 function setFlow() {
   const m = S.map;
   if (!m || !S.mapReady) return;
-  if (m.getLayer('yolcu-flow')) m.removeLayer('yolcu-flow');
+  for (const id of FLOW_LAYERS) if (m.getLayer(id)) m.removeLayer(id);
   if (m.getSource('tt-flow')) m.removeSource('tt-flow');
   if (!key() || !store.prefs.traffic) return;
-  m.addSource('tt-flow', { type: 'raster', tiles: [traffic.flowTiles(key(), theme() === 'dark')], tileSize: 256, attribution: '© TomTom' });
-  m.addLayer({ id: 'yolcu-flow', type: 'raster', source: 'tt-flow', paint: { 'raster-opacity': 0.9 } }, 'yolcu-alt-case');
+  m.addSource('tt-flow', { type: 'vector', tiles: [traffic.flowTiles(key())], maxzoom: 22, attribution: '© TomTom' });
+  const lvl = ['to-number', ['get', 'traffic_level'], 1];
+  const closed = ['==', ['get', 'road_closure'], true];
+  // Sadece ana yollar (ara sokaklardaki küçük yavaşlamalar haritayı kalabalıklaştırıyor)
+  const major = ['match', ['get', 'road_type'], ['Motorway', 'International road', 'Major road', 'Secondary road', 'Connecting road', 'Major local road'], true, false];
+  const width = ['interpolate', ['linear'], ['zoom'], 10, 1.6, 14, 3.2, 18, 7];
+  const base = { type: 'line', source: 'tt-flow', 'source-layer': 'Traffic flow', minzoom: 9, layout: { 'line-cap': 'round', 'line-join': 'round' } };
+  // Yavaş: turuncu kesikli
+  m.addLayer({ ...base, id: 'yolcu-flow-slow', filter: ['all', major, ['!', closed], ['>=', lvl, 0.35], ['<', lvl, 0.62]],
+    paint: { 'line-color': '#FF9500', 'line-width': width, 'line-dasharray': [1.6, 1.1], 'line-opacity': 0.95 } }, 'yolcu-alt-case');
+  // Sıkışık: kırmızı
+  m.addLayer({ ...base, id: 'yolcu-flow-jam', filter: ['all', major, ['!', closed], ['<', lvl, 0.35]],
+    paint: { 'line-color': '#E5241B', 'line-width': width, 'line-opacity': 0.95 } }, 'yolcu-alt-case');
+  // Kapalı: koyu kırmızı kesikli
+  m.addLayer({ ...base, id: 'yolcu-flow-closed', filter: closed,
+    paint: { 'line-color': '#8E0000', 'line-width': width, 'line-dasharray': [0.8, 1.2] } }, 'yolcu-alt-case');
 }
 
 function drawIncidents() {
   if (!S.mapReady) return;
-  const list = S.nav ? S.navInc : (store.prefs.traffic ? S.incidents : []);
+  const list = (S.nav ? S.navInc : (store.prefs.traffic ? S.incidents : [])).filter(i => i.cat !== 6 || (S.nav && i.delay >= 60));
   S.map.getSource('yolcu-inc')?.setData({
     type: 'FeatureCollection',
     features: list.map(i => ({ type: 'Feature', properties: { id: i.id, img: ensureIncImage(i) }, geometry: { type: 'Point', coordinates: i.point } }))
@@ -1005,7 +1020,7 @@ async function refreshNavIncidents() {
   try {
     const list = await traffic.incidents(key(), traffic.bboxOf(rem, 0.004));
     if (!S.nav) return;
-    S.navInc = traffic.onRoute(list, S.navRoute);
+    S.navInc = traffic.onRoute(list.filter(i => i.cat !== 6 || i.delay >= 60), S.navRoute);
     drawIncidents();
   } catch { }
 }
@@ -1014,7 +1029,8 @@ async function refreshNavTraffic() {
   if (!S.nav || !key()) return;
   const r = S.navRoute;
   try {
-    const rem = { coords: sliceAlong(r.coords, r.cum, S.nav.along, r.lengthM), time: 1 };
+    if (!S.lastRemS) return;
+    const rem = { coords: sliceAlong(r.coords, r.cum, S.nav.along, r.lengthM), time: S.lastRemS };
     const t = await traffic.routeTraffic(key(), rem);
     if (S.nav) { S.trafRatio = t.trafficRatio; setJams(t.jams); }
   } catch { }
@@ -1091,7 +1107,8 @@ function navTick(p) {
   if (st.upIdx !== S.arrowFor) { S.arrowFor = st.upIdx; maneuverArrow(st.up); }
   renderBanner(st);
 
-  const remS = st.remS * (S.trafRatio && !walk ? Math.max(0.85, S.trafRatio) : 1);
+  S.lastRemS = st.remS;
+  const remS = st.remS * (S.trafRatio && !walk ? Math.min(2.5, Math.max(0.5, S.trafRatio)) : 1);
   $('nav-eta').textContent = G.fmtClock(new Date(Date.now() + remS * 1000));
   setDur(remS, 'nav-rem', 'nav-rem-u');
   setKm(st.remM);

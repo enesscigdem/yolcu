@@ -4,8 +4,9 @@ import { projectOnSegment } from './geo.js';
 
 const API = 'https://api.tomtom.com';
 
-export const flowTiles = (key, dark) =>
-  `${API}/traffic/map/4/tile/flow/${dark ? 'relative0-dark' : 'relative0'}/{z}/{x}/{y}.png?key=${encodeURIComponent(key)}&tileSize=256&thickness=8`;
+// Vektör trafik verisi: her yol parçasında traffic_level (0 = durmuş, 1 = akıcı) ve road_closure var.
+// Kendimiz çiziyoruz: akıcı yollar boyanmaz, sadece yavaş/sıkışık/kapalı olanlar (Apple gibi).
+export const flowTiles = key => `${API}/traffic/map/4/tile/flow/relative/{z}/{x}/{y}.pbf?key=${encodeURIComponent(key)}`;
 
 export const CATS = {
   0: ['Olay', '⚠️'], 1: ['Kaza', '💥'], 2: ['Sis', '🌫️'], 3: ['Tehlikeli yol', '⚠️'], 4: ['Yağmur', '🌧️'],
@@ -71,12 +72,12 @@ export async function routeTraffic(key, route, signal) {
     kind: s.simpleCategory || 'JAM'
   })).filter(s => s.coords.length > 1);
   const sum = rt.summary;
-  // Valhalla süresini, TomTom'un trafikli/trafiksiz oranıyla ölçekle
-  const ratio = sum.noTrafficTravelTimeInSeconds ? sum.travelTimeInSeconds / sum.noTrafficTravelTimeInSeconds : 1;
+  // Aynı yol için TomTom'un canlı trafikli süresi (Apple/Google'a en yakın tahmin).
+  // trafficRatio: navigasyonda kendi kalan süremizi bu tahmine uydurmak için kullanılır.
   return {
-    trafficTime: Math.round(route.time * Math.max(ratio, 0.85) + 0),
-    trafficDelay: Math.max(0, sum.trafficDelayInSeconds || (sum.travelTimeInSeconds - (sum.noTrafficTravelTimeInSeconds || sum.travelTimeInSeconds))),
-    trafficRatio: ratio,
+    trafficTime: Math.round(sum.travelTimeInSeconds),
+    trafficDelay: Math.max(0, sum.trafficDelayInSeconds || 0),
+    trafficRatio: route.time > 0 ? sum.travelTimeInSeconds / route.time : 1,
     jams
   };
 }
