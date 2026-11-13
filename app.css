@@ -55,7 +55,9 @@
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body {
-  margin: 0; height: 100%; overflow: hidden; position: fixed; inset: 0;
+  margin: 0; overflow: hidden; position: fixed; top: 0; left: 0; right: 0;
+  /* iOS 26 ana ekran uygulamasında alt boşluk hatası: yüksekliği JS ile ekran boyuna ayarlıyoruz */
+  height: var(--app-h, 100%);
   font-family: var(--font); color: var(--text); background: var(--page);
   -webkit-font-smoothing: antialiased; -webkit-user-select: none; user-select: none;
   -webkit-touch-callout: none; overscroll-behavior: none;
@@ -119,7 +121,7 @@ h1, h2, h3, p { margin: 0; }
   flex: 1; overflow: hidden; padding: 0 16px calc(var(--safe-b) + 24px);
   -webkit-overflow-scrolling: touch; overscroll-behavior: contain; touch-action: none;
 }
-.sheet[data-detent="full"] .sheet-body { overflow-y: auto; touch-action: pan-y; }
+.sheet[data-detent="full"] .sheet-body { overflow-y: auto; touch-action: pan-y; padding-bottom: calc(var(--safe-b) + 24px + var(--kb, 0px)); }
 
 /* Arama çubuğu */
 .search-row { display: flex; align-items: center; gap: 10px; padding: 2px 0 14px; }
@@ -354,3 +356,84 @@ body.navigating .controls, body.navigating .where-pill, body.navigating .sheet {
 /* Splash */
 .boot { position: absolute; inset: 0; display: grid; place-items: center; background: var(--page); z-index: 100; transition: opacity .4s; }
 .boot.out { opacity: 0; pointer-events: none; }
+
+/* ---------- Harita görünümü menüsü ---------- */
+.layers { position: absolute; z-index: 30; right: 12px; top: calc(var(--safe-t) + 10px); width: min(320px, calc(100% - 24px)); border-radius: 26px; padding: 14px; background: var(--glass-strong); animation: popIn .28s cubic-bezier(.32, .72, 0, 1); transform-origin: top right; }
+@keyframes popIn { from { transform: scale(.85); opacity: 0; } }
+.layers-head { display: flex; align-items: center; justify-content: space-between; padding: 2px 4px 12px; }
+.layers-head b { font-size: 20px; font-weight: 700; }
+.map-types { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+.mt { display: flex; flex-direction: column; gap: 6px; align-items: center; font-size: 14px; font-weight: 600; }
+.mt-img { width: 100%; height: 72px; border-radius: 14px; border: 3px solid transparent; background-size: cover; background-position: center; }
+.mt.on .mt-img { border-color: var(--blue); }
+.mt.on { color: var(--blue); }
+.mt-img.std { background: linear-gradient(115deg, transparent 46%, #FFC95A 46%, #FFC95A 54%, transparent 54%), linear-gradient(25deg, transparent 58%, #fff 58%, #fff 63%, transparent 63%), radial-gradient(circle at 22% 30%, #C9E6BB 0 18%, transparent 19%), #F3F1EC; }
+.mt-img.sat { background-image: url("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/14/6295/9427"); }
+.layers .list { background: var(--card); }
+
+/* ---------- Ulaşım türü ---------- */
+.mode-seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; background: var(--fill); border-radius: 14px; padding: 3px; margin: -4px 0 12px; }
+.mode-seg button { display: flex; align-items: center; justify-content: center; gap: 6px; height: 38px; border-radius: 11px; font-size: 14px; font-weight: 600; color: var(--text2); }
+.mode-seg button svg { width: 18px; height: 18px; }
+.mode-seg button.on { background: var(--glass-strong); color: var(--blue); box-shadow: 0 3px 10px rgba(0, 0, 0, .12); }
+:root:not([data-theme="dark"]) .mode-seg button.on { background: #fff; }
+
+/* ---------- Güzergah (hangi yoldan) ---------- */
+.timeline { padding: 6px 0; }
+.tl-item { display: flex; align-items: flex-start; gap: 14px; padding: 7px 16px; width: 100%; text-align: left; position: relative; }
+.tl-item::before { content: ""; position: absolute; left: 25px; top: 0; bottom: 0; width: 4px; background: var(--blue); opacity: .85; }
+.tl-item.start::before { top: 50%; }
+.tl-item.end::before { bottom: 50%; }
+.tl-item.local::before { background: repeating-linear-gradient(var(--text3) 0 5px, transparent 5px 9px); opacity: 1; }
+.tl-dot { width: 22px; height: 22px; border-radius: 50%; background: var(--card); border: 4px solid var(--blue); flex: none; position: relative; z-index: 1; margin-top: 1px; }
+:root:not([data-theme="dark"]) .tl-dot { background: #fff; }
+.tl-item.local .tl-dot { width: 12px; height: 12px; margin: 5px 5px 0; border-width: 3px; border-color: var(--text3); }
+.tl-item.start .tl-dot { background: var(--blue); border-color: #fff; box-shadow: 0 0 0 2px var(--blue); }
+.tl-item.end .tl-dot { background: var(--red); border-color: #fff; box-shadow: 0 0 0 2px var(--red); }
+.tl-item.road.hw .tl-dot { border-color: #1E8A4C; }
+.tl-item.road.main .tl-dot { border-color: #1F6FD1; }
+.tl-item b { display: block; font-size: 17px; font-weight: 600; }
+.tl-item small { display: block; font-size: 14px; color: var(--text2); margin-top: 1px; }
+.tl-item.road:active { background: var(--fill); }
+.story-text { font-size: 15px; line-height: 1.5; color: var(--text2); padding: 10px 6px 0; }
+.icon-link { display: inline-flex; align-items: center; gap: 5px; }
+.icon-link svg { width: 17px; height: 17px; }
+
+.road-chip { padding: 4px 9px; border-radius: 8px; background: #fff; color: #1d1d1f; font: 700 13px/1.1 var(--font); box-shadow: 0 2px 8px rgba(0, 0, 0, .28); border: 2px solid #fff; white-space: nowrap; pointer-events: none; }
+.road-chip.main { background: #1F6FD1; color: #fff; }
+.road-chip.hw { background: #1E8A4C; color: #fff; }
+
+/* ---------- Navigasyonda olay uyarısı ---------- */
+.nav-alert { margin: 8px auto 0; width: fit-content; max-width: 100%; display: flex; align-items: center; gap: 8px; padding: 9px 14px 9px 10px; border-radius: 18px; background: #FF9500; color: #fff; font-size: 15px; box-shadow: 0 6px 18px rgba(0, 0, 0, .25); }
+.nav-alert.m2 { background: #FF3B30; }
+.nav-alert.m3 { background: #B3261E; }
+.na-emoji { width: 30px; height: 30px; border-radius: 50%; background: #fff; display: grid; place-items: center; font-size: 17px; }
+.speed.walk .limit { display: none; }
+
+/* ---------- Ayarlar: ses, anahtar, simge ---------- */
+.tip { width: 100%; display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 16px; background: color-mix(in srgb, var(--orange) 14%, transparent); text-align: left; margin-top: 12px; }
+.tip > svg { width: 22px; height: 22px; color: var(--orange); flex: none; }
+.tip > svg:last-child { width: 14px; height: 14px; color: var(--text3); }
+.tip span { flex: 1; }
+.tip b { display: block; font-size: 15px; }
+.tip small { font-size: 13px; color: var(--text2); }
+.voice-row { gap: 12px; }
+.radio { width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--text3); flex: none; display: grid; place-items: center; color: #fff; }
+.radio.on { background: var(--blue); border-color: var(--blue); }
+.radio svg { width: 15px; height: 15px; }
+.voice-row .row-main { flex: 1; }
+.ai { font-size: 11px; font-weight: 700; color: var(--blue); background: color-mix(in srgb, var(--blue) 14%, transparent); padding: 2px 6px; border-radius: 6px; margin-left: 4px; vertical-align: 2px; }
+.pill-btn { height: 32px; padding: 0 14px; border-radius: 16px; background: var(--fill); color: var(--blue); font-size: 15px; font-weight: 600; flex: none; }
+.pill-btn.blue { background: var(--blue); color: #fff; }
+.text-input { flex: 1; min-width: 0; height: 40px; border-radius: 10px; border: 0; background: var(--fill); color: var(--text); padding: 0 12px; font: inherit; font-size: 16px; outline: none; -webkit-user-select: text; user-select: text; }
+.icon-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; padding: 4px 2px; }
+.icon-opt { display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 500; color: var(--text2); }
+.icon-opt img { width: 100%; aspect-ratio: 1; border-radius: 22%; box-shadow: 0 3px 10px rgba(0, 0, 0, .18); border: 3px solid transparent; }
+.icon-opt.on img { border-color: var(--blue); }
+.icon-opt.on { color: var(--blue); font-weight: 700; }
+.steps-box { margin-top: 10px; padding: 14px 16px; border-radius: 14px; background: color-mix(in srgb, var(--blue) 10%, transparent); font-size: 15px; line-height: 1.5; }
+.steps-box ol { margin: 8px 0; padding-left: 20px; }
+.steps-box small { color: var(--text2); }
+.group-foot a { color: var(--blue); }
+
+.ref { display: inline-block; font-size: 12px; font-weight: 700; padding: 1px 6px; border-radius: 5px; background: #1F6FD1; color: #fff; vertical-align: 2px; margin-left: 4px; }

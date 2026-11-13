@@ -1,9 +1,10 @@
 // Yolcu service worker: uygulama dosyalarını önbelleğe alır, internet yokken de açılır
-const VERSION = 'yolcu-v1';
+const VERSION = 'yolcu-v2';
 const SHELL = [
   './', 'index.html', 'app.css', 'manifest.webmanifest',
   'js/app.js', 'js/api.js', 'js/geo.js', 'js/guide.js', 'js/icons.js', 'js/mapstyle.js', 'js/nav.js', 'js/store.js',
-  'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png'
+  'js/traffic.js', 'js/neural.js',
+  'icons/mavi-180.png', 'icons/yol-180.png', 'icons/harita-180.png', 'icons/gece-180.png', 'icons/y-180.png'
 ];
 const CDN = ['https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js', 'https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css'];
 
@@ -12,7 +13,7 @@ self.addEventListener('install', e => {
 });
 
 self.addEventListener('activate', e => {
-  e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== VERSION && k !== 'yolcu-map').map(k => caches.delete(k)))).then(() => self.clients.claim()));
+  e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== VERSION && k !== 'yolcu-map' && k !== 'yolcu-voices').map(k => caches.delete(k)))).then(() => self.clients.claim()));
 });
 
 function timeout(ms) { return new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms)); }
@@ -33,7 +34,7 @@ self.addEventListener('fetch', e => {
   }
 
   // Harita kütüphanesi, yazı tipleri, ikonlar ve stil: önce önbellek
-  if (url.hostname === 'unpkg.com' || (url.hostname === 'tiles.openfreemap.org' && /\/(fonts|sprites|styles)\//.test(url.pathname))) {
+  if (url.hostname === 'unpkg.com' || url.hostname === 'cdn.jsdelivr.net' || (url.hostname === 'tiles.openfreemap.org' && /\/(fonts|sprites|styles)\//.test(url.pathname))) {
     e.respondWith(
       caches.open('yolcu-map').then(async c => {
         const hit = await c.match(req);

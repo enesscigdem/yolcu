@@ -1,5 +1,6 @@
 // Ücretsiz servisler: Valhalla (rota), Photon + Nominatim (arama / adres)
 import { decode6, cumulative, sameRoute, pointAt } from './geo.js';
+import { story } from './guide.js';
 
 const VALHALLA = 'https://valhalla1.openstreetmap.de';
 const PHOTON = 'https://photon.komoot.io';
@@ -105,17 +106,29 @@ function costing(prefs, mode) {
   return base;
 }
 
+// Ulaşım türüne göre maliyet ayarları
+function costingFor(prefs, travel, variant) {
+  if (travel === 'pedestrian') {
+    return { name: 'pedestrian', opts: { use_hills: variant === 'alt' ? 0.5 : (prefs.hills ? 0.05 : 0.5), walkway_factor: 0.9, alley_factor: 2, use_lit: 0.3, use_tracks: 0.1, step_penalty: prefs.hills ? 30 : 0 } };
+  }
+  if (travel === 'bicycle') {
+    return { name: 'bicycle', opts: { bicycle_type: 'Hybrid', use_hills: variant === 'alt' ? 0.5 : (prefs.hills ? 0.05 : 0.5), avoid_bad_surfaces: prefs.rough ? 0.8 : 0.3, use_roads: 0.3, use_living_streets: 0.6 } };
+  }
+  return { name: 'auto', opts: costing(prefs, variant) };
+}
+
 function loc(p, extra = {}) {
   const o = { lat: +p.lat.toFixed(6), lon: +p.lon.toFixed(6), ...extra };
   if (p.heading != null && p.speed > 3) { o.heading = Math.round(p.heading); o.heading_tolerance = 50; }
   return o;
 }
 
-function buildRequest(locations, prefs, avoids, mode, alternates) {
+function buildRequest(locations, prefs, avoids, mode, alternates, travel = 'auto') {
+  const c = costingFor(prefs, travel, mode);
   const body = {
     locations,
-    costing: 'auto',
-    costing_options: { auto: costing(prefs, mode) },
+    costing: c.name,
+    costing_options: { [c.name]: c.opts },
     directions_options: { units: 'kilometers', language: 'tr-TR' },
     alternates
   };
@@ -125,7 +138,7 @@ function buildRequest(locations, prefs, avoids, mode, alternates) {
 
 const SILENT = new Set([27]); // döner kavşaktan çıkış: girişte zaten söyleniyor
 
-function tripToRoute(trip) {
+function tripToRoute(trip, travel = 'auto') {
   const coords = [];
   const maneuvers = [];
   let offset = 0;
@@ -159,6 +172,7 @@ function tripToRoute(trip) {
   const cum = cumulative(coords);
   for (const m of maneuvers) m.along = cum[Math.min(m.begin, cum.length - 1)];
   return {
+    mode: travel,
     coords, cum, maneuvers,
     lengthM: cum[cum.length - 1],
     time: trip.summary.time,
@@ -179,14 +193,14 @@ export async function analyze(route, signal) {
     encoded_polyline: route.raw.legs.length === 1 ? route.raw.legs[0].shape : undefined,
     shape: route.raw.legs.length === 1 ? undefined : route.coords.map(c => ({ lat: c[1], lon: c[0] })),
     shape_match: 'edge_walk',
-    costing: 'auto',
+    costing: route.mode || 'auto',
     filters: {
       attributes: ['edge.speed_limit', 'edge.names', 'edge.road_class', 'edge.begin_shape_index', 'edge.end_shape_index',
         'edge.surface', 'edge.length', 'edge.max_upward_grade', 'edge.max_downward_grade', 'edge.weighted_grade', 'edge.use'],
       action: 'include'
     }
   }, signal);
-  const st = { total: 0, motorway: 0, main: 0, small: 0, rough: 0, steep: 0, names: {}, edges: [] };
+  const st = { total: 0, motorway: 0, main: 0, small: 0, rough: 0, steep: 0, steps: 0, names: {}, edges: [] };
   for (const e of j.edges || []) {
     const m = (e.length || 0) * 1000;
     st.total += m;
@@ -197,9 +211,10 @@ export async function analyze(route, signal) {
     // weighted_grade: parçanın ortalama eğimi (%). Uç değerler gürültülü olduğundan sadece bunu kullan
     const g = Math.abs(e.weighted_grade || 0);
     if (g >= 7 && m > 15) st.steep += g >= 10 ? m * 1.5 : m;
+    if (e.use === 'steps') st.steps++;
     const nm = (e.names || [])[0];
     if (nm) st.names[nm] = (st.names[nm] || 0) + m;
-    st.edges.push({ b: e.begin_shape_index, e: e.end_shape_index, limit: e.speed_limit || 0, name: nm || '', cls: e.road_class });
+    st.edges.push({ b: e.begin_shape_index, e: e.end_shape_index, limit: e.speed_limit || 0, name: nm || '', names: e.names || [], cls: e.road_class });
   }
   return st;
 }
@@ -209,7 +224,13 @@ const TURN_TYPES = new Set([9, 10, 11, 12, 13, 14, 15, 16, 26]);
 function scoreRoute(r, prefs) {
   const a = r.stats;
   r.turns = r.maneuvers.filter(m => TURN_TYPES.has(m.type)).length;
-  let s = r.time + r.turns * 10;
+  if (r.mode !== 'auto') {
+    let s = r.time + r.turns * 3;
+    if (a) s += a.steep * (prefs.hills ? 1.2 : 0.1) + a.rough * (prefs.rough ? 0.3 : 0.02) + a.steps * (prefs.hills ? 20 : 2);
+    r.score = s;
+    return;
+  }
+  let s = (r.trafficTime || r.time) + r.turns * 10;
   if (a) {
     s += a.small * 0.05;
     s += a.rough * (prefs.rough ? 0.4 : 0.05);
@@ -229,10 +250,15 @@ function describe(r) {
     else tags.push({ t: `${Math.round(a.steep / 50) * 50} m dik yokuş`, c: a.steep > 600 ? 'bad' : 'warn' });
     if (a.rough < 80) tags.push({ t: 'Yol düzgün', c: 'good' });
     else tags.push({ t: `${Math.round(a.rough / 50) * 50} m bozuk yol`, c: a.rough > 400 ? 'bad' : 'warn' });
-    if (a.total > 0 && (a.motorway + a.main) / a.total > 0.6) tags.push({ t: 'Ana yol ağırlıklı', c: 'good' });
-    if (a.small > 1500) tags.push({ t: `${(a.small / 1000).toFixed(1).replace('.', ',')} km ara sokak`, c: 'warn' });
+    if (r.mode === 'pedestrian' && a.steps) tags.push({ t: 'Merdiven var', c: 'warn' });
+    if (r.mode === 'auto' && a.total > 0 && (a.motorway + a.main) / a.total > 0.6) tags.push({ t: 'Ana yol ağırlıklı', c: 'good' });
+    if (r.mode === 'auto' && a.small > 1500) tags.push({ t: `${(a.small / 1000).toFixed(1).replace('.', ',')} km ara sokak`, c: 'warn' });
   } else {
     r.via = '';
+  }
+  if (r.trafficDelay != null) {
+    const d = Math.round(r.trafficDelay / 60);
+    tags.unshift(d >= 2 ? { t: `Trafik +${d} dk`, c: d >= 6 ? 'bad' : 'warn' } : { t: 'Trafik akıcı', c: 'good' });
   }
   tags.push({ t: `${r.turns} dönüş`, c: r.turns > 14 ? 'warn' : 'plain' });
   if (r.hasToll) tags.push({ t: 'Ücretli', c: 'warn' });
@@ -240,12 +266,12 @@ function describe(r) {
 }
 
 // Ana fonksiyon: birkaç farklı rota iste, hepsini incele, en rahatını öner
-export async function planRoutes(from, to, prefs, avoids, signal) {
+export async function planRoutes(from, to, prefs, avoids, signal, travel = 'auto', traffic = null) {
   const locations = [loc(from), loc(to)];
-  const reqs = [
-    vpost('/route', buildRequest(locations, prefs, avoids, 'comfort', 2), signal),
-    vpost('/route', buildRequest(locations, prefs, avoids, 'fast', 2), signal)
-  ];
+  const ex = travel === 'auto' ? avoids : [];
+  const reqs = travel === 'auto'
+    ? [vpost('/route', buildRequest(locations, prefs, ex, 'comfort', 2), signal), vpost('/route', buildRequest(locations, prefs, ex, 'fast', 2), signal)]
+    : [vpost('/route', buildRequest(locations, prefs, ex, 'main', 2, travel), signal), vpost('/route', buildRequest(locations, prefs, ex, 'alt', 1, travel), signal)];
   const results = await Promise.allSettled(reqs);
   const trips = [];
   for (const res of results) {
@@ -258,15 +284,20 @@ export async function planRoutes(from, to, prefs, avoids, signal) {
   }
   const routes = [];
   for (const t of trips) {
-    const r = tripToRoute(t);
+    const r = tripToRoute(t, travel);
     if (!routes.some(x => sameRoute(x, r))) routes.push(r);
     if (routes.length >= 4) break;
   }
   await Promise.all(routes.map(async r => {
     try { r.stats = await analyze(r, signal); } catch (e) { if (e.name === 'AbortError') throw e; r.stats = null; }
+    // Trafik (TomTom anahtarı varsa): gerçek süre, gecikme ve sıkışık bölümler
+    if (traffic && travel === 'auto') {
+      try { Object.assign(r, await traffic(r, signal)); } catch (e) { if (e.name === 'AbortError') throw e; }
+    }
   }));
-  routes.forEach(r => { scoreRoute(r, prefs); describe(r); });
-  const fastest = routes.reduce((a, b) => (b.time < a.time ? b : a));
+  routes.forEach(r => { scoreRoute(r, prefs); describe(r); r.story = story(r); });
+  const tt = r => r.trafficTime || r.time;
+  const fastest = routes.reduce((a, b) => (tt(b) < tt(a) ? b : a));
   routes.sort((a, b) => a.score - b.score);
   routes[0].best = true;
   fastest.fastest = true;
@@ -275,19 +306,23 @@ export async function planRoutes(from, to, prefs, avoids, signal) {
 
 // Rotadan çıkınca: önce eski rotaya geri bağlanmayı dene, çok uzarsa yeni rota
 export async function reroute(from, to, oldRoute, along, prefs, avoids) {
-  const fresh = vpost('/route', buildRequest([loc(from), loc(to)], prefs, avoids, 'comfort', 0));
+  const travel = oldRoute.mode || 'auto';
+  const v = travel === 'auto' ? 'comfort' : 'main';
+  if (travel !== 'auto') avoids = [];
+  const fresh = vpost('/route', buildRequest([loc(from), loc(to)], prefs, avoids, v, 0, travel));
   let rejoin = null;
   const target = along + 700;
   if (target < oldRoute.lengthM - 300) {
     const p = pointAt(oldRoute.coords, oldRoute.cum, target);
-    rejoin = vpost('/route', buildRequest([loc(from), { lat: p.lat, lon: p.lon, type: 'through' }, loc(to)], prefs, avoids, 'comfort', 0));
+    rejoin = vpost('/route', buildRequest([loc(from), { lat: p.lat, lon: p.lon, type: 'through' }, loc(to)], prefs, avoids, v, 0, travel));
   }
   const [f, r] = await Promise.allSettled([fresh, rejoin || Promise.reject(new Error('yok'))]);
-  const F = f.status === 'fulfilled' ? tripToRoute(f.value.trip) : null;
-  const J = r.status === 'fulfilled' ? tripToRoute(r.value.trip) : null;
+  const F = f.status === 'fulfilled' ? tripToRoute(f.value.trip, travel) : null;
+  const J = r.status === 'fulfilled' ? tripToRoute(r.value.trip, travel) : null;
   let pick = F;
   if (J && (!F || J.time <= F.time + 180)) pick = J;
   if (!pick) throw (f.reason || new Error('Rota bulunamadı'));
   try { pick.stats = await analyze(pick); } catch { pick.stats = null; }
+  pick.story = story(pick);
   return pick;
 }

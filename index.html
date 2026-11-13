@@ -8,11 +8,10 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Yolcu">
   <meta name="format-detection" content="telephone=no">
-  <meta name="theme-color" content="#F3F1EC">
   <title>Yolcu</title>
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="apple-touch-icon" href="icons/icon-180.png">
-  <link rel="icon" type="image/png" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/mavi-180.png">
+  <link rel="icon" type="image/png" href="icons/mavi-180.png">
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
   <link rel="stylesheet" href="app.css">
 </head>
@@ -29,10 +28,13 @@
   <div id="controls" class="glass controls">
     <button id="btn-locate" data-act="locate" aria-label="Konumuma git"></button>
     <span class="ctl-sep"></span>
-    <button id="btn-3d" data-act="toggle3d" aria-label="3B görünüm" class="ctl-text">3B</button>
+    <button id="btn-layers" data-act="openLayers" aria-label="Harita görünümü"></button>
     <span class="ctl-sep"></span>
     <button id="btn-settings" data-act="openSettings" aria-label="Ayarlar"></button>
   </div>
+
+  <!-- Harita görünümü menüsü -->
+  <div id="layers" class="glass layers" hidden></div>
 
   <!-- Alt panel -->
   <section id="sheet" class="sheet glass" data-detent="peek">
@@ -51,6 +53,7 @@
       </div>
     </div>
     <div id="nav-then" class="nav-then" hidden></div>
+    <div id="nav-alert" class="nav-alert" hidden></div>
     <div id="nav-status" class="nav-status" hidden></div>
   </div>
 

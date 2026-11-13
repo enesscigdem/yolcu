@@ -8,13 +8,19 @@ const DEFAULTS = {
   recents: [],
   avoids: [],
   activeNav: null,
+  tomtomKey: null,
   prefs: {
     highways: true,   // ana yolları tercih et
     hills: true,      // yokuşlardan kaçın
     rough: true,      // bozuk yollardan kaçın
     tolls: false,     // ücretli yollardan kaçın
     voice: true,
-    theme: 'auto'
+    theme: 'auto',
+    tilt: true,          // 3B görünüm
+    traffic: true,       // trafik katmanı (anahtar varsa)
+    mapType: 'standard', // standard | satellite
+    voiceEngine: 'system', // system | fahrettin | fettah | dfki
+    icon: 'mavi'
   }
 };
 
@@ -61,7 +67,20 @@ export function importBackup(text) {
   const j = JSON.parse(text);
   const d = j && j.app === 'yolcu' ? j.data : null;
   if (!d) throw new Error('Bu bir Yolcu yedeği değil');
-  for (const k of ['home', 'work', 'places', 'recents', 'avoids']) if (k in d) store[k] = d[k];
+  for (const k of ['home', 'work', 'places', 'recents', 'avoids', 'tomtomKey']) if (k in d) store[k] = d[k];
+  if (d.prefs) store.prefs = { ...store.prefs, ...d.prefs };
+  save();
+}
+
+// Simge değiştirirken ayarları bağlantıya gömmek için (sadece cihazda kalır, sunucuya gitmez)
+export function packForLink() {
+  const d = { home: store.home, work: store.work, places: store.places, avoids: store.avoids, prefs: store.prefs, tomtomKey: store.tomtomKey };
+  return btoa(unescape(encodeURIComponent(JSON.stringify(d)))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+export function unpackFromLink(str) {
+  const b = str.replace(/-/g, '+').replace(/_/g, '/');
+  const d = JSON.parse(decodeURIComponent(escape(atob(b))));
+  for (const k of ['home', 'work', 'places', 'avoids', 'tomtomKey']) if (d[k] != null) store[k] = d[k];
   if (d.prefs) store.prefs = { ...store.prefs, ...d.prefs };
   save();
 }

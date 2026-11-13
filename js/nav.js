@@ -66,7 +66,8 @@ export class Navigator {
     this.along = along;
 
     // Rotadan çıktı mı?
-    const tol = clamp((p.acc || 10) * 1.5, 40, 90);
+    const mode = this.r.mode || 'auto';
+    const tol = mode === 'auto' ? clamp((p.acc || 10) * 1.5, 40, 90) : clamp((p.acc || 10) * 1.3, 25, 60);
     this.off = s.d > tol ? this.off + 1 : 0;
     let reroute = false;
     if (this.off >= 3 && Date.now() - this.lastReroute > 10000) { reroute = true; this.lastReroute = Date.now(); }
@@ -97,10 +98,11 @@ export class Navigator {
 
     // Sesli uyarılar
     let say = null;
-    const v = Math.max(p.speed || 0, 6);
-    const farD = v > 22 ? 1600 : v > 14 ? 800 : 450;
-    const nearD = v > 22 ? 600 : v > 14 ? 300 : 170;
-    const nowD = clamp(v * 3.5, 30, 90);
+    const v = Math.max(p.speed || 0, mode === 'auto' ? 6 : 1.2);
+    let farD, nearD, nowD;
+    if (mode === 'pedestrian') { farD = 150; nearD = 50; nowD = 15; }
+    else if (mode === 'bicycle') { farD = 300; nearD = 100; nowD = 25; }
+    else { farD = v > 22 ? 1600 : v > 14 ? 800 : 450; nearD = v > 22 ? 600 : v > 14 ? 300 : 170; nowD = clamp(v * 3.5, 30, 90); }
 
     if (!this.started) {
       this.started = true;
@@ -113,7 +115,7 @@ export class Navigator {
       if (this.upIdx !== j) {
         this.upIdx = j;
         this.stage = {};
-        if (distToNext > farD + 400 && k > 0) {
+        if (distToNext > Math.max(farD + 400, 1500) && k > 0) {
           const c = G.continueSpeech(this.streetAt(s.i, k), distToNext);
           if (c) say = c;
           this.stage.post = true;
