@@ -50,11 +50,13 @@ export const I = {
   layers: s('M12 3.5 2.8 8.2 12 13l9.2-4.8zM3.5 12.2 12 16.6l8.5-4.4M3.5 16.2 12 20.6l8.5-4.4', 1.9),
   copy: s('M8.5 8.5h10v12h-10zM5.5 15.5v-12h10', 2),
   check: s('M5 12.5l4.5 4.5L19 7.5', 2.6),
+  camera: f('M9.2 4.5h5.6l1.5 2H19a2.5 2.5 0 0 1 2.5 2.5v8.5A2.5 2.5 0 0 1 19 20H5a2.5 2.5 0 0 1-2.5-2.5V9A2.5 2.5 0 0 1 5 6.5h2.7zM12 9a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm0 2a2 2 0 1 1 0 4 2 2 0 0 1 0-4z'),
+  route: s('M6 19.5a2 2 0 1 0 0-.01zM18 6.5a2 2 0 1 0 0-.01zM6 17.5V14a3 3 0 0 1 3-3h6a3 3 0 0 0 3-3V8.5', 2.2),
   compass: s('M12 3.5a8.5 8.5 0 1 1 0 17 8.5 8.5 0 0 1 0-17zM15.5 8.5l-2 5-5 2 2-5z', 1.9)
 };
 
 export const KIND_ICON = {
   pin: ['pin', 'c-red'], food: ['food', 'c-orange'], fuel: ['fuel', 'c-blue'], health: ['health', 'c-pink'],
   shop: ['shop', 'c-yellow'], school: ['school', 'c-brown'], road: ['road', 'c-gray'], parking: ['parking', 'c-blue'],
-  home: ['home', 'c-blue'], work: ['work', 'c-brown'], star: ['star', 'c-yellow'], recent: ['clock', 'c-gray']
+  home: ['home', 'c-teal'], work: ['work', 'c-brown'], star: ['star', 'c-yellow'], recent: ['clock', 'c-gray']
 };

@@ -1,7 +1,7 @@
 import { store, save, addRecent, isSaved, toggleSaved, exportBackup, importBackup, packForLink, unpackFromLink } from './store.js';
 import * as api from './api.js';
 import * as traffic from './traffic.js';
-import * as neural from './neural.js';
+import * as radar from './radar.js';
 import { loadStyle, applyPalette, PALETTES, firstLabelLayer } from './mapstyle.js';
 import * as G from './guide.js';
 import { Navigator, Simulator } from './nav.js';
@@ -14,27 +14,53 @@ const IZMIR = { lon: 27.142, lat: 38.423 };
 const EMPTY = { type: 'FeatureCollection', features: [] };
 const wide = () => window.innerWidth >= 700;
 const ICONS = { mavi: 'Mavi Ok', yol: 'Gün Batımı', harita: 'Harita', gece: 'Gece', y: 'Y Ayrımı' };
-const TRAVEL = { auto: ['Araba', 'car'], pedestrian: ['Yürüyüş', 'walk'], bicycle: ['Bisiklet', 'bike'] };
+const TRAVEL = { auto: ['Araba', 'car'], pedestrian: ['Yürüyüş', 'walk'] };
+
+// Eski sürümden gelen ayarları güncelle
+if (!store.prefs.v3) {
+  store.prefs.tilt = false;           // gezinirken düz harita (Apple gibi), navigasyonda 3B
+  store.prefs.radar = true;
+  store.prefs.radarSound = true;
+  delete store.prefs.voiceEngine;
+  store.prefs.v3 = true;
+  if (!Array.isArray(store.radars)) store.radars = [];
+  save();
+}
+if (!Array.isArray(store.radars)) store.radars = [];
 
 const S = {
   map: null, mapReady: false, pos: null, firstFix: true, puck: null, destMarker: null,
   view: 'home', place: null, results: null, routes: [], sel: 0, dest: null, routeErr: null, travel: 'auto',
   pickFor: null, nav: null, navRoute: null, sim: null, follow: true, rerouting: false,
   where: null, whereAt: null, whereBusy: false, wake: null, arrowFor: -1, arrived: false,
-  dragEnd: 0, autoStart: false, chips: [], incidents: [], incAt: null, navInc: [], incSaid: new Set(),
-  trafRatio: null, timers: [], dl: {}, navIntro: null, incident: null
+  dragEnd: 0, autoStart: false, chips: [], incidents: [], incAt: null, navInc: [], said: new Set(),
+  trafRatio: null, timers: [], navIntro: null, incident: null,
+  cams: [], navCams: [], weather: null, weatherAt: null
 };
 const key = () => store.tomtomKey;
 const theme = () => { const p = store.prefs.theme; return p === 'auto' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : p; };
 
 /* ================= iOS ekran boyu ================= */
-// iOS 26 ana ekran uygulamalarında sayfa ekranın altına kadar uzanmıyor; ekran boyuna zorla.
-function setAppH() {
+// iOS 26 ana ekran uygulamasında görünüm, durum çubuğu kadar kısa geliyor (WebKit 301108).
+// CSS'te düzeltiyoruz; burada da yedek olarak ekran boyunu zorluyoruz.
+const probeT = document.createElement('div');
+probeT.style.cssText = 'position:absolute;left:0;top:0;width:1px;height:env(safe-area-inset-top);visibility:hidden;pointer-events:none';
+const probeB = document.createElement('div');
+probeB.style.cssText = 'position:absolute;left:0;top:0;width:1px;height:env(safe-area-inset-bottom);visibility:hidden;pointer-events:none';
+document.body.append(probeT, probeB);
+const safeT = () => probeT.offsetHeight;
+const safeB = () => probeB.offsetHeight;
+
+function fitScreen() {
   const standalone = navigator.standalone || matchMedia('(display-mode: standalone)').matches;
-  let h = window.innerHeight;
   const portrait = window.innerWidth < window.innerHeight;
-  if (standalone && portrait && screen.height > h && screen.height - h < 140) h = screen.height;
-  document.documentElement.style.setProperty('--app-h', h + 'px');
+  const html = document.documentElement;
+  if (standalone && portrait && screen.height - window.innerHeight > 8 && screen.height - window.innerHeight < 160) {
+    html.style.height = screen.height + 'px';
+  } else if (standalone) {
+    html.style.height = '';
+  }
+  if (window.scrollY) window.scrollTo(0, 0);
 }
 function onViewport() {
   const vv = window.visualViewport;
@@ -42,18 +68,19 @@ function onViewport() {
   const kb = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
   document.documentElement.style.setProperty('--kb', (kb > 80 ? kb : 0) + 'px');
 }
-setAppH();
-addEventListener('resize', () => { setAppH(); S.map?.resize(); });
-addEventListener('orientationchange', () => setTimeout(() => { setAppH(); S.map?.resize(); }, 300));
+fitScreen();
+addEventListener('resize', () => { fitScreen(); S.map?.resize(); });
+addEventListener('orientationchange', () => setTimeout(() => { fitScreen(); S.map?.resize(); }, 300));
+addEventListener('scroll', () => { if (!document.activeElement?.matches?.('input')) window.scrollTo(0, 0); }, { passive: true });
 window.visualViewport?.addEventListener('resize', onViewport);
-document.addEventListener('focusout', () => setTimeout(() => { window.scrollTo(0, 0); onViewport(); }, 50));
+document.addEventListener('focusout', () => setTimeout(() => { window.scrollTo(0, 0); onViewport(); }, 60));
 
 /* ================= Tema ================= */
 const mq = matchMedia('(prefers-color-scheme: dark)');
 function applyTheme() {
   const t = theme();
   document.documentElement.dataset.theme = t;
-  if (S.mapReady) { applyPalette(S.map, PALETTES[t], store.prefs.mapType); setFlow(); }
+  if (S.mapReady) { applyPalette(S.map, PALETTES[t], { type: store.prefs.mapType, nav: !!S.nav }); setFlow(); }
 }
 mq.addEventListener?.('change', applyTheme);
 
@@ -68,42 +95,25 @@ function toast(msg, ms = 2600) {
   toastT = setTimeout(() => { t.hidden = true; }, ms);
 }
 
-/* ================= Ses ================= */
+/* ================= Ses (telefonun kendi sesi) ================= */
 const voice = {
   ok: 'speechSynthesis' in window, v: null,
   init() {
-    if (this.ok) {
-      const pick = () => {
-        const vs = speechSynthesis.getVoices().filter(x => /^tr/i.test(x.lang));
-        // Telefonda "Gelişmiş" (Enhanced) ses indirildiyse onu kullan
-        this.v = vs.find(x => /gelişmiş|enhanced|premium/i.test(x.name)) || vs.find(x => /yelda/i.test(x.name)) || vs[0] || null;
-      };
-      pick();
-      speechSynthesis.addEventListener?.('voiceschanged', pick);
-    }
-    const e = this.engine();
-    if (e !== 'system') setTimeout(() => neural.isDownloaded(e).then(d => d && neural.load(e)).catch(() => { }), 1500);
+    if (!this.ok) return;
+    const pick = () => {
+      const vs = speechSynthesis.getVoices().filter(x => /^tr/i.test(x.lang));
+      this.v = vs.find(x => /gelişmiş|enhanced|premium/i.test(x.name)) || vs.find(x => /yelda/i.test(x.name)) || vs[0] || null;
+    };
+    pick();
+    speechSynthesis.addEventListener?.('voiceschanged', pick);
   },
-  engine() { return store.prefs.voiceEngine || 'system'; },
   unlock() {
-    neural.unlock();
+    radar.unlockBeep();
     try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch { }
     if (this.ok) { try { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; speechSynthesis.speak(u); } catch { } }
   },
-  async say(text, force = false, engine = null) {
-    if (!text || (!store.prefs.voice && !force)) return;
-    const e = engine || this.engine();
-    if (e !== 'system') {
-      if (neural.loadedVoice() === e) {
-        if (this.ok) speechSynthesis.cancel();
-        if (await neural.speak(text)) return;
-      } else neural.isDownloaded(e).then(d => d && neural.load(e)).catch(() => { });
-    }
-    this.sys(text);
-  },
-  sys(text) {
-    if (!this.ok) return;
-    neural.stop();
+  say(text, force = false) {
+    if (!this.ok || !text || (!store.prefs.voice && !force)) return;
     const go = () => {
       const u = new SpeechSynthesisUtterance(text);
       u.lang = 'tr-TR'; if (this.v) u.voice = this.v; u.rate = 1;
@@ -111,8 +121,7 @@ const voice = {
     };
     if (speechSynthesis.speaking || speechSynthesis.pending) { speechSynthesis.cancel(); setTimeout(go, 80); } else go();
   },
-  prefetch(text) { if (this.engine() !== 'system' && text) neural.prefetch(text); },
-  stop() { neural.stop(); if (this.ok) speechSynthesis.cancel(); }
+  stop() { if (this.ok) speechSynthesis.cancel(); }
 };
 
 /* ================= Ekranı açık tut ================= */
@@ -123,12 +132,6 @@ async function keepAwake(on) {
   } catch { }
 }
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && S.nav) keepAwake(true); });
-
-/* ================= Güvenli alan ================= */
-const probe = document.createElement('div');
-probe.style.cssText = 'position:fixed;left:0;bottom:0;width:1px;height:env(safe-area-inset-bottom);visibility:hidden;pointer-events:none';
-document.body.appendChild(probe);
-const safeB = () => probe.offsetHeight;
 
 /* ================= Alt panel (sheet) ================= */
 const sheet = {
@@ -141,19 +144,19 @@ const sheet = {
   H() { return this.el.offsetHeight; },
   peekH() {
     const a = this.body.querySelector('[data-peek]');
-    if (!a) return 200;
+    if (!a) return 220;
     const r = a.getBoundingClientRect(), s = this.el.getBoundingClientRect();
-    return Math.round(r.bottom - s.top + 14 + safeB());
+    return Math.round(r.bottom - s.top + 16 + safeB());
   },
   heights() {
     const H = this.H();
-    return { peek: Math.min(this.peekH(), H), half: Math.min(Math.max(Math.round(H * 0.55), this.peekH()), H), full: H };
+    return { peek: Math.min(this.peekH(), H), half: Math.min(Math.max(Math.round(H * 0.56), this.peekH()), H), full: H };
   },
   set(d, anim = true) {
     this.detent = d;
     const vis = this.heights()[d];
     this.y = Math.max(0, this.H() - vis);
-    this.el.style.transition = anim ? 'transform .5s cubic-bezier(.32,.72,0,1)' : 'none';
+    this.el.style.transition = anim ? 'transform .55s cubic-bezier(.32,.72,0,1)' : 'none';
     this.el.style.transform = `translateY(${this.y}px)`;
     this.el.dataset.detent = d;
     if (d !== 'full') this.body.scrollTop = 0;
@@ -163,7 +166,7 @@ const sheet = {
     const el = this.el;
     let g = null;
     el.addEventListener('pointerdown', e => {
-      if (e.button > 0 || e.target.closest('input, select, textarea, .favs, .icon-grid')) return;
+      if (e.button > 0 || e.target.closest('input, select, textarea, .favs')) return;
       g = { id: e.pointerId, y0: e.clientY, x0: e.clientX, start: this.y, active: false, onGrab: !!e.target.closest('.grab-area'), scrolled: this.body.scrollTop > 2, vy: 0, py: e.clientY, pt: performance.now() };
     });
     el.addEventListener('pointermove', e => {
@@ -207,8 +210,9 @@ const sheet = {
 };
 
 /* ================= Harita ================= */
-const NAV_ARROW = '<svg viewBox="0 0 50 50"><path d="M25 3 L43 45 L25 35 L7 45 Z" fill="#0A84FF" stroke="#fff" stroke-width="4" stroke-linejoin="round"/></svg>';
-const PIN = '<svg viewBox="0 0 38 46"><path d="M19 45s-15-14-15-26a15 15 0 0 1 30 0c0 12-15 26-15 26z" fill="#FF3B30" stroke="#fff" stroke-width="2.5"/><circle cx="19" cy="19" r="6" fill="#fff"/></svg>';
+// Apple tarzı navigasyon oku: beyaz çerçeveli mavi daire içinde beyaz ok
+const NAV_ARROW = '<svg viewBox="0 0 56 56"><circle cx="28" cy="28" r="23" fill="#0A84FF" stroke="#fff" stroke-width="4.5"/><path d="M28 14 L38.5 38 L28 32.5 L17.5 38 Z" fill="#fff" stroke="#fff" stroke-width="2" stroke-linejoin="round"/></svg>';
+const PIN = '<svg viewBox="0 0 40 48"><path d="M20 47s-16-15-16-27a16 16 0 0 1 32 0c0 12-16 27-16 27z" fill="#FF3B30" stroke="#fff" stroke-width="2.5"/><circle cx="20" cy="20" r="6.5" fill="#fff"/></svg>';
 
 async function initMap() {
   let style;
@@ -216,15 +220,16 @@ async function initMap() {
   catch { toast('Harita yüklenemedi. İnternet bağlantını kontrol et.', 5000); return; }
   const map = S.map = new maplibregl.Map({
     container: 'map', style, center: [IZMIR.lon, IZMIR.lat], zoom: 12, attributionControl: false,
-    maxPitch: 70, fadeDuration: 150, dragRotate: true, pitchWithRotate: true
+    maxPitch: 70, fadeDuration: 200, dragRotate: true, pitchWithRotate: true
   });
   map.on('load', () => {
     addLayers();
     S.mapReady = true;
     applyTheme();
     $('map').classList.add('ready');
-    if (S.pos) { S.firstFix = false; map.jumpTo({ center: [S.pos.lon, S.pos.lat], zoom: 16, pitch: store.prefs.tilt ? 50 : 0 }); updatePuck(S.pos); }
+    if (S.pos) { S.firstFix = false; map.jumpTo({ center: [S.pos.lon, S.pos.lat], zoom: 15.5, pitch: store.prefs.tilt ? 50 : 0 }); updatePuck(S.pos); }
     loadIncidents();
+    drawRadars();
   });
   map.on('styleimagemissing', () => { });
   map.on('dragstart', () => {
@@ -257,12 +262,12 @@ function headImage() {
   return x.getImageData(0, 0, 64, 64);
 }
 
-function incImage(emoji, ring) {
+function badgeImage(emoji, ring, fill = '#fff') {
   const c = document.createElement('canvas');
   c.width = c.height = 96;
   const x = c.getContext('2d');
   x.shadowColor = 'rgba(0,0,0,.35)'; x.shadowBlur = 8; x.shadowOffsetY = 3;
-  x.beginPath(); x.arc(48, 46, 38, 0, Math.PI * 2); x.fillStyle = '#fff'; x.fill();
+  x.beginPath(); x.arc(48, 46, 38, 0, Math.PI * 2); x.fillStyle = fill; x.fill();
   x.shadowColor = 'transparent';
   x.lineWidth = 7; x.strokeStyle = ring; x.stroke();
   x.font = '40px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
@@ -273,7 +278,7 @@ function incImage(emoji, ring) {
 const ringColor = i => (i.cat === 8 ? '#8E0000' : i.mag >= 3 ? '#D70015' : i.mag === 2 ? '#FF3B30' : '#FF9500');
 function ensureIncImage(i) {
   const id = `inc-${i.cat}-${i.mag}`;
-  if (!S.map.hasImage(id)) S.map.addImage(id, incImage(i.emoji, ringColor(i)), { pixelRatio: 2 });
+  if (!S.map.hasImage(id)) S.map.addImage(id, badgeImage(i.emoji, ringColor(i)), { pixelRatio: 2 });
   return id;
 }
 
@@ -285,9 +290,10 @@ function addLayers() {
   m.addSource('yolcu-jams', { type: 'geojson', data: EMPTY });
   m.addSource('yolcu-arrow', { type: 'geojson', data: EMPTY });
   m.addSource('yolcu-inc', { type: 'geojson', data: EMPTY });
-  m.addLayer({ id: 'yolcu-alt-case', type: 'line', source: 'yolcu-routes', filter: ['!', ['get', 'sel']], layout: round, paint: { 'line-color': '#6E9FD8', 'line-width': w(6, 22) } }, before);
-  m.addLayer({ id: 'yolcu-alt', type: 'line', source: 'yolcu-routes', filter: ['!', ['get', 'sel']], layout: round, paint: { 'line-color': '#9EC5F5', 'line-width': w(4, 16) } }, before);
-  m.addLayer({ id: 'yolcu-route-case', type: 'line', source: 'yolcu-routes', filter: ['get', 'sel'], layout: round, paint: { 'line-color': '#0060DF', 'line-width': w(8, 26) } }, before);
+  m.addSource('yolcu-cams', { type: 'geojson', data: EMPTY });
+  m.addLayer({ id: 'yolcu-alt-case', type: 'line', source: 'yolcu-routes', filter: ['!', ['get', 'sel']], layout: round, paint: { 'line-color': '#5E92D2', 'line-width': w(6, 22) } }, before);
+  m.addLayer({ id: 'yolcu-alt', type: 'line', source: 'yolcu-routes', filter: ['!', ['get', 'sel']], layout: round, paint: { 'line-color': '#8DBDF7', 'line-width': w(4, 16) } }, before);
+  m.addLayer({ id: 'yolcu-route-case', type: 'line', source: 'yolcu-routes', filter: ['get', 'sel'], layout: round, paint: { 'line-color': '#0057D2', 'line-width': w(8, 26) } }, before);
   m.addLayer({ id: 'yolcu-route', type: 'line', source: 'yolcu-routes', filter: ['get', 'sel'], layout: round, paint: { 'line-color': '#0A84FF', 'line-width': w(5.5, 19) } }, before);
   m.addLayer({
     id: 'yolcu-jams', type: 'line', source: 'yolcu-jams', layout: round,
@@ -299,6 +305,12 @@ function addLayers() {
   m.addLayer({
     id: 'yolcu-arrow-head', type: 'symbol', source: 'yolcu-arrow', minzoom: 13, filter: ['==', ['geometry-type'], 'Point'],
     layout: { 'icon-image': 'yolcu-head', 'icon-rotate': ['get', 'b'], 'icon-rotation-alignment': 'map', 'icon-pitch-alignment': 'map', 'icon-allow-overlap': true, 'icon-ignore-placement': true, 'icon-size': ['interpolate', ['exponential', 1.5], ['zoom'], 13, 0.35, 18, 1.5] }
+  });
+  m.addImage('cam-osm', badgeImage('📷', '#0A84FF'), { pixelRatio: 2 });
+  m.addImage('cam-user', badgeImage('📷', '#AF52DE'), { pixelRatio: 2 });
+  m.addLayer({
+    id: 'yolcu-cams', type: 'symbol', source: 'yolcu-cams', minzoom: 12,
+    layout: { 'icon-image': ['get', 'img'], 'icon-allow-overlap': true, 'icon-size': ['interpolate', ['linear'], ['zoom'], 12, 0.5, 16, 0.85] }
   });
   m.addLayer({
     id: 'yolcu-inc', type: 'symbol', source: 'yolcu-inc', minzoom: 9,
@@ -312,6 +324,11 @@ function addLayers() {
     const id = e.features[0]?.properties?.id;
     const inc = [...S.incidents, ...S.navInc].find(x => String(x.id) === String(id));
     if (inc && !S.nav) showIncident(inc);
+  });
+  m.on('click', 'yolcu-cams', e => {
+    if (S.nav) return;
+    const p = e.features[0]?.properties;
+    toast(p?.max ? `Radar · hız sınırı ${p.max} km/sa` : 'Radar');
   });
 }
 
@@ -331,8 +348,8 @@ function setDest(p) {
 }
 
 function camPadding() {
-  if (wide()) return { top: 60, bottom: 60, left: 440, right: 70 };
-  return { top: 70, bottom: Math.min(sheet.visible(), window.innerHeight * 0.6) + 20, left: 40, right: 70 };
+  if (wide()) return { top: 60, bottom: 60, left: 450, right: 80 };
+  return { top: safeT() + 70, bottom: Math.min(sheet.visible(), window.innerHeight * 0.6) + 20, left: 40, right: 76 };
 }
 
 function fitCoords(coords, opts = {}) {
@@ -374,7 +391,6 @@ async function loadIncidents(force = false) {
   if (area > 9000) return;
   const prev = S.incAt;
   if (!force && prev && Date.now() - prev.t < 90000 && bbox[0] >= prev.b[0] && bbox[1] >= prev.b[1] && bbox[2] <= prev.b[2] && bbox[3] <= prev.b[3]) return;
-  // biraz geniş al ki küçük kaydırmalarda tekrar istemeyelim
   const pad = [(bbox[2] - bbox[0]) * 0.3, (bbox[3] - bbox[1]) * 0.3];
   const big = [bbox[0] - pad[0], bbox[1] - pad[1], bbox[2] + pad[0], bbox[3] + pad[1]];
   try {
@@ -388,6 +404,36 @@ function showIncident(inc) {
   S.incident = inc; S.view = 'incident';
   render(); sheet.set('half');
   S.map?.easeTo({ center: inc.point, zoom: Math.max(S.map.getZoom(), 15), padding: camPadding(), duration: 600 });
+}
+
+/* ---------- Radarlar ---------- */
+const allCams = () => [...S.cams, ...store.radars.map((r, i) => ({ id: `user${i}`, lat: r.lat, lon: r.lon, max: r.max || null, dir: null, src: 'user' }))];
+
+function drawRadars() {
+  if (!S.mapReady) return;
+  const list = store.prefs.radar ? (S.nav ? S.navCams : allCams()) : [];
+  S.map.getSource('yolcu-cams')?.setData({
+    type: 'FeatureCollection',
+    features: list.map(c => ({ type: 'Feature', properties: { img: c.src === 'user' ? 'cam-user' : 'cam-osm', max: c.max || 0 }, geometry: { type: 'Point', coordinates: [c.lon, c.lat] } }))
+  });
+}
+
+async function loadRadars(p) {
+  if (!store.prefs.radar || S.radarLoading) return;
+  S.radarLoading = true;
+  try { S.cams = await radar.around(p.lat, p.lon); drawRadars(); }
+  catch { S.cams = radar.cached(); drawRadars(); }
+  finally { S.radarLoading = false; }
+}
+
+/* ---------- Hava durumu ---------- */
+async function updateWeather(p) {
+  if (S.weatherAt && Date.now() - S.weatherAt < 30 * 60e3) return;
+  S.weatherAt = Date.now();
+  try {
+    S.weather = await api.weather(p.lat, p.lon);
+    renderWherePill();
+  } catch { S.weatherAt = null; }
 }
 
 /* ---------- Yol adı rozetleri (rota üzerinde) ---------- */
@@ -436,11 +482,12 @@ function onPos(p) {
   const first = !S.pos;
   S.pos = p;
   updatePuck(p);
-  if (first) updateLocateBtn();
-  if (S.firstFix && S.mapReady && !S.nav) { S.firstFix = false; S.map.jumpTo({ center: [p.lon, p.lat], zoom: 16, pitch: store.prefs.tilt ? 50 : 0 }); }
+  if (first) { updateLocateBtn(); loadRadars(p); updateWeather(p); }
+  if (S.firstFix && S.mapReady && !S.nav) { S.firstFix = false; S.map.jumpTo({ center: [p.lon, p.lat], zoom: 15.5, pitch: store.prefs.tilt ? 50 : 0 }); }
   if (S.nav) navTick(p);
   else {
     updateWhere(p);
+    updateWeather(p);
     if (S.view === 'where' && (!S.whereRender || Date.now() - S.whereRender > 1000)) { S.whereRender = Date.now(); render(); }
   }
 }
@@ -488,6 +535,8 @@ function renderWherePill() {
   if (!r) return;
   $('where-road').textContent = r.road || r.hood || 'Buradasın';
   $('where-area').textContent = [r.road ? r.hood : null, r.district].filter(Boolean).join(', ');
+  const w = $('weather');
+  if (S.weather) { w.hidden = false; w.innerHTML = `<i>${S.weather.icon}</i>${S.weather.temp}°`; } else w.hidden = true;
 }
 
 function updateLocateBtn() {
@@ -512,10 +561,7 @@ function prefsList(travel = 'auto') {
   const P = store.prefs;
   const row = (k, title, sub) => `<label class="row"><span class="row-main"><span class="row-title">${title}</span><span class="row-sub wrap">${sub}</span></span><input type="checkbox" class="switch" data-pref="${k}" ${P[k] ? 'checked' : ''}></label>`;
   if (travel !== 'auto') {
-    return `<div class="list plain">
-      ${row('hills', 'Yokuşlardan kaçın', 'Dik yokuş ve merdivenleri önermez')}
-      ${row('rough', 'Bozuk yollardan kaçın', 'Toprak ve bozuk yüzeyli yolları önermez')}
-    </div>`;
+    return `<div class="list plain">${row('hills', 'Yokuşlardan kaçın', 'Dik yokuş ve merdivenleri önermez')}</div>`;
   }
   return `<div class="list plain">
     ${row('highways', 'Ana yolları tercih et', 'Otoyol, çevre yolu ve bulvarlardan götürür')}
@@ -539,19 +585,20 @@ function viewHome() {
   const resume = an && !S.nav && Date.now() - an.t < 4 * 3600e3
     ? `<button class="resume" data-act="resumeNav">${I.car}<span style="flex:1"><b>Yola devam et</b><small>${esc(an.dest.name)}</small></span><span class="close" data-act="dismissResume" style="background:rgba(255,255,255,.25);color:#fff">${I.x}</span></button>` : '';
   const recents = store.recents.length
-    ? `<div class="list">${store.recents.map((p, i) => placeRow(p, 'recent', i, 'recent')).join('')}</div>`
+    ? `<div class="list">${store.recents.slice(0, 6).map((p, i) => placeRow(p, 'recent', i, 'recent')).join('')}</div>`
     : `<div class="list"><div class="empty">Gittiğin yerler burada görünecek.</div></div>`;
-  const ttHint = !key() ? `<button class="tip" data-act="openSettings">${I.warn}<span><b>Trafik ve kaza bilgisi kapalı</b><small>Açmak için dokun, 2 dakikalık kurulum</small></span>${I.chevron}</button>` : '';
+  const ttHint = !key() ? `<button class="tip" data-act="openSettings"><span class="row-icon c-orange">${I.warn}</span><span class="t"><b>Trafik ve kaza bilgisi kapalı</b><small>Açmak için dokun · 2 dakikalık kurulum</small></span>${I.chevron}</button>` : '';
   return `
     <div class="search-row">
       <button class="searchbar" data-act="openSearch">${I.search}<span>Yolcu’da Ara</span></button>
+      <button class="avatar" data-act="openSettings" aria-label="Ayarlar">${I.gear}</button>
     </div>
     ${resume}
     <div class="section" data-peek>
       <div class="section-head"><h3>Favoriler</h3></div>
       <div class="favs">
-        ${fav('home', 'Ev', 'home', 'c-blue')}
         ${fav('work', 'İş', 'work', 'c-brown')}
+        ${fav('home', 'Ev', 'home', 'c-teal')}
         ${places}
         <button class="fav" data-act="addPlace"><span class="fav-icon add">${I.plus}</span><span class="fav-title">Ekle</span><span class="fav-sub">&nbsp;</span></button>
       </div>
@@ -561,7 +608,7 @@ function viewHome() {
       <div class="section-head"><h3>Son Kullanılanlar</h3>${store.recents.length ? '<button class="link small" data-act="clearRecents">Temizle</button>' : ''}</div>
       ${recents}
     </div>
-    <p class="legal">Harita © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> katkıcıları · OpenFreeMap · Mapterhorn · Uydu © Esri · Rota: Valhalla${key() ? ' · Trafik © TomTom' : ''}</p>`;
+    <p class="legal">Harita © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> katkıcıları · OpenFreeMap · Mapterhorn · Uydu © Esri · Rota: Valhalla · Hava: Open‑Meteo${key() ? ' · Trafik © TomTom' : ''}</p>`;
 }
 
 function viewSearch() {
@@ -588,8 +635,8 @@ function resultsHtml(list) {
   }
   const quick = [];
   if (!S.pickFor) {
-    if (store.home) quick.push(`<button class="row" data-act="fav" data-k="home">${placeIcon('home')}<span class="row-main"><span class="row-title">Ev</span><span class="row-sub">${esc(store.home.sub || store.home.name)}</span></span><span class="row-meta">${distFromMe(store.home)}</span></button>`);
     if (store.work) quick.push(`<button class="row" data-act="fav" data-k="work">${placeIcon('work')}<span class="row-main"><span class="row-title">İş</span><span class="row-sub">${esc(store.work.name)}</span></span><span class="row-meta">${distFromMe(store.work)}</span></button>`);
+    if (store.home) quick.push(`<button class="row" data-act="fav" data-k="home">${placeIcon('home')}<span class="row-main"><span class="row-title">Ev</span><span class="row-sub">${esc(store.home.sub || store.home.name)}</span></span><span class="row-meta">${distFromMe(store.home)}</span></button>`);
     store.recents.slice(0, 8).forEach((p, i) => quick.push(placeRow(p, 'recent', i, 'recent')));
   }
   return quick.length ? `<div class="list">${quick.join('')}</div>` : '';
@@ -612,7 +659,10 @@ function viewPlace() {
       <button data-act="saveHere" class="${saved ? 'on' : ''}">${I.star}<span>${saved ? 'Kayıtlı' : 'Kaydet'}</span></button>
       <button data-act="sharePlace">${I.share}<span>Paylaş</span></button>
     </div>
-    ${p.isPoint ? `<div class="section"><div class="list plain"><button class="row danger" data-act="avoidHere"><span class="row-icon c-red">${I.noentry}</span><span class="row-main"><span class="row-title">Bu yoldan beni geçirme</span><span class="row-sub wrap">Rotalar artık bu noktadaki yolu kullanmaz</span></span></button></div></div>` : ''}`;
+    ${p.isPoint ? `<div class="section"><div class="list plain">
+      <button class="row danger" data-act="avoidHere"><span class="row-icon c-red">${I.noentry}</span><span class="row-main"><span class="row-title">Bu yoldan beni geçirme</span><span class="row-sub wrap">Rotalar artık bu noktadaki yolu kullanmaz</span></span></button>
+      <button class="row" data-act="radarHere"><span class="row-icon c-purple">${I.camera}</span><span class="row-main"><span class="row-title">Burada radar var</span><span class="row-sub wrap">Buradan geçerken seni uyarır</span></span></button>
+    </div></div>` : ''}`;
 }
 
 function viewIncident() {
@@ -627,7 +677,7 @@ function viewIncident() {
     </div>
     <div class="stats-grid" data-peek>
       <div class="stat-card"><small>Gecikme</small><b>${d >= 1 ? d : '—'}<span>${d >= 1 ? 'dk' : ''}</span></b></div>
-      <div class="stat-card"><small>Başlangıç</small><b style="font-size:20px">${since ? G.fmtClock(since) : '—'}</b></div>
+      <div class="stat-card"><small>Başlangıç</small><b style="font-size:21px">${since ? G.fmtClock(since) : '—'}</b></div>
     </div>
     <p class="legal" style="text-align:left;margin-top:6px">Kaynak: TomTom canlı trafik</p>`;
 }
@@ -646,7 +696,7 @@ function storyHtml(r) {
     if (s.kind === 'local') return `<div class="tl-item local"><span class="tl-dot"></span><div><small>Ara sokaklar · ${G.fmtDist(s.m)}</small></div></div>`;
     const cls = s.cls === 'motorway' ? 'hw' : (s.cls === 'trunk' || s.cls === 'primary') ? 'main' : '';
     const tw = s.toward?.length ? ` · ${esc(s.toward.join(', '))} yönü` : '';
-    return `<button class="tl-item road ${cls}" data-act="focusSeg" data-i="${i}"><span class="tl-dot"></span><div><b>${esc(s.name)}${s.ref ? ` <span class="ref">${esc(s.ref)}</span>` : ""}</b><small>${G.fmtDist(s.m)}${tw}</small></div></button>`;
+    return `<button class="tl-item road ${cls}" data-act="focusSeg" data-i="${i}"><span class="tl-dot"></span><div><b>${esc(s.name)}${s.ref ? ` <span class="ref">${esc(s.ref)}</span>` : ''}</b><small>${G.fmtDist(s.m)}${tw}</small></div></button>`;
   }).join('');
   return `
     <div class="section">
@@ -678,12 +728,12 @@ function viewRoutes() {
         <div class="rc-main">
           ${badges ? `<div class="rc-badges">${badges}</div>` : ''}
           <div class="rc-time">${fmtBig(rtime(r))}</div>
-          <div class="rc-sub">${G.fmtDist(r.lengthM)} · Varış ${eta}${diffTxt}</div>
+          <div class="rc-sub">${eta} varış · ${G.fmtDist(r.lengthM)}${diffTxt}</div>
           ${via ? `<div class="rc-via">${esc(via)}</div>` : ''}
           <div class="tags">${r.tags.map(t => `<span class="tag ${t.c}">${esc(t.t)}</span>`).join('')}</div>
         </div>
         <div class="rc-side">
-          <button class="go" data-act="go" data-i="${i}">Git</button>
+          <button class="go" data-act="go" data-i="${i}">GİT</button>
           <button class="link small" data-act="preview" data-i="${i}">Önizle</button>
         </div>
       </div>`;
@@ -700,12 +750,18 @@ function viewRoutes() {
       return `<div class="row"><span class="step-icon">${G.arrowSvg(m)}</span><span class="row-main"><span class="row-title">${esc(G.action(m))}</span>${sub ? `<span class="row-sub wrap">${esc(sub)}</span>` : ''}</span><span class="row-meta">${seg > 5 ? G.fmtDist(seg) : ''}</span></div>`;
     }).join('');
   }
+  const destKind = d.kind === 'work' ? ['work', 'c-brown'] : d.kind === 'home' ? ['home', 'c-teal'] : ['pin', 'c-red'];
   return `
-    <div class="card-head">
-      <div><h2>${esc(d.name)}</h2><p class="sub">Konumundan${S.routes.length ? ` · ${S.routes.length} rota` : ''}</p></div>
+    <div class="card-head center">
+      <button class="circle-btn" data-act="shareEta" aria-label="Paylaş">${I.share}</button>
+      <div><h2>Yol Tarifi</h2></div>
       <button class="close" data-act="closeRoutes" aria-label="Kapat">${I.x}</button>
     </div>
     <div class="mode-seg">${modes}</div>
+    <div class="fromto">
+      <div class="ft-row"><span class="ft-dot c-blue">${I.loc}</span><span>Konumum</span></div>
+      <div class="ft-row"><span class="ft-dot ${destKind[1]}">${I[destKind[0]]}</span><span>${esc(d.name)}</span></div>
+    </div>
     ${cards}
     ${r ? storyHtml(r) : ''}
     <div class="section"><div class="section-head"><h3>Rota Tercihleri</h3></div>${prefsList(S.travel)}</div>
@@ -717,6 +773,7 @@ function viewWhere() {
   const p = S.pos;
   const kmh = p ? Math.round((p.speed || 0) * 3.6) : 0;
   const area = [r.hood, r.district, r.city].filter(Boolean).join(', ');
+  const w = S.weather;
   return `
     <div class="card-head">
       <div><p class="eyebrow">Şu an buradasın</p><h2>${esc(r.road || r.hood || 'Konum alınıyor…')}</h2>${area ? `<p class="sub">${esc(area)}</p>` : ''}</div>
@@ -724,11 +781,11 @@ function viewWhere() {
     </div>
     <div class="stats-grid" data-peek>
       <div class="stat-card"><small>Hız</small><b>${kmh}<span>km/sa</span></b></div>
-      <div class="stat-card"><small>Yön</small><b style="font-size:20px">${p?.heading != null && p.speed > 0.8 ? compass(p.heading) : '—'}</b></div>
+      <div class="stat-card"><small>Hava</small><b>${w ? `${w.icon} ${w.temp}°` : '—'}</b></div>
+      <div class="stat-card"><small>Yön</small><b style="font-size:21px">${p?.heading != null && p.speed > 0.8 ? compass(p.heading) : '—'}</b></div>
       <div class="stat-card"><small>Rakım</small><b>${p?.alt != null ? Math.round(p.alt) : '—'}<span>${p?.alt != null ? 'm' : ''}</span></b></div>
-      <div class="stat-card"><small>Konum hassasiyeti</small><b>${p ? '±' + Math.round(p.acc || 0) : '—'}<span>${p ? 'm' : ''}</span></b></div>
     </div>
-    ${p ? `<div class="list plain"><button class="row" data-act="copyCoords"><span class="row-main"><span class="row-title">Koordinatlar</span><span class="row-sub">${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}</span></span><span class="row-meta" style="color:var(--blue)">Kopyala</span></button></div>` : ''}
+    ${p ? `<div class="list plain"><button class="row" data-act="copyCoords"><span class="row-main"><span class="row-title">Koordinatlar</span><span class="row-sub">${p.lat.toFixed(5)}, ${p.lon.toFixed(5)} · ±${Math.round(p.acc || 0)} m</span></span><span class="row-meta" style="color:var(--blue)">Kopyala</span></button></div>` : ''}
     <div class="action-grid" style="grid-template-columns:repeat(2,1fr)">
       <button data-act="shareMe">${I.share}<span>Konumumu Paylaş</span></button>
       <button data-act="saveMe">${I.star}<span>Burayı Kaydet</span></button>
@@ -903,7 +960,8 @@ function startNav(i, simulate = false) {
   S.navRoute = route;
   S.nav = new Navigator(route);
   S.follow = true; S.arrowFor = -1; S.arrived = false; S.bannerFor = null;
-  S.navInc = []; S.incSaid = new Set(); S.trafRatio = route.trafficRatio || null;
+  S.navInc = []; S.said = new Set(); S.trafRatio = route.trafficRatio || null;
+  S.navCams = route.mode === 'auto' ? radar.onRoute(allCams(), route) : [];
   const eta = G.fmtClock(new Date(Date.now() + rtime(route) * 1000));
   S.navIntro = [G.storyShort(route.story), `Tahmini varış ${eta}.`].filter(Boolean).join(' ');
   document.body.classList.add('navigating');
@@ -911,17 +969,21 @@ function startNav(i, simulate = false) {
   $('nav-recenter').hidden = true;
   $('nav-alert').hidden = true;
   $('speed-limit').hidden = true;
+  closeNavMenu();
   $('nav-speed').classList.toggle('walk', route.mode !== 'auto');
+  $('nav-radar').hidden = route.mode !== 'auto';
   updateMuteBtn();
-  $('nav-overview').innerHTML = I.map;
+  $('nav-overview').innerHTML = I.route;
+  $('nav-radar').innerHTML = I.camera;
   S.puck?.getElement().classList.add('nav');
   clearChips();
   setRoutesData([line(route.coords, { i: 0, sel: true })]);
   setJams(route.jams);
   setDest(S.dest);
+  applyTheme();
   drawIncidents();
+  drawRadars();
   keepAwake(true);
-  // Trafik: 2 dakikada bir yoldaki kazalar, 5 dakikada bir varış süresi
   if (key() && route.mode === 'auto') {
     refreshNavIncidents();
     S.timers.push(setInterval(refreshNavIncidents, 120000));
@@ -967,8 +1029,8 @@ function showSimStatus() {
 
 function navPadding() {
   const H = window.innerHeight;
-  if (wide()) return { top: Math.round(H * 0.35), bottom: 60, left: 440, right: 40 };
-  return { top: Math.round(H * 0.42), bottom: 110 + safeB(), left: 0, right: 0 };
+  if (wide()) return { top: Math.round(H * 0.35), bottom: 60, left: 450, right: 40 };
+  return { top: Math.round(H * 0.44), bottom: 120 + safeB(), left: 0, right: 0 };
 }
 
 function maneuverArrow(m) {
@@ -1001,8 +1063,18 @@ function renderBanner(st) {
   const th = $('nav-then');
   if (st.then && st.gap < 400 && st.distToNext < 1200) {
     th.hidden = false;
-    th.innerHTML = `<span>Ardından</span>${G.arrowSvg(st.then)}<span>${esc(G.action(st.then))}</span>`;
+    th.innerHTML = `${G.arrowSvg(st.then)}<span><span class="lbl">Ardından</span> ${esc(G.action(st.then))}${st.then.street ? ` · ${esc(st.then.street)}` : ''}</span>`;
   } else th.hidden = true;
+}
+
+function setDur(sec, valId, unitId) {
+  const min = Math.max(1, Math.round(sec / 60));
+  if (min < 60) { $(valId).textContent = min; $(unitId).textContent = 'dk'; }
+  else { $(valId).textContent = `${Math.floor(min / 60)}:${String(min % 60).padStart(2, '0')}`; $(unitId).textContent = 'sa'; }
+}
+function setKm(m) {
+  if (m >= 1000) { $('nav-km').textContent = m >= 10000 ? Math.round(m / 1000) : (m / 1000).toFixed(1).replace('.', ','); $('nav-km-u').textContent = 'km'; }
+  else { $('nav-km').textContent = Math.round(m / 10) * 10; $('nav-km-u').textContent = 'm'; }
 }
 
 function navTick(p) {
@@ -1016,42 +1088,56 @@ function navTick(p) {
   if (S.puck) { S.puck.setLngLat([pp.lon, pp.lat]); S.puck.setRotation(hd); }
 
   setRoutesData([line(sliceAlong(r.coords, r.cum, st.along, st.total), { i: 0, sel: true })]);
-  if (st.upIdx !== S.arrowFor) {
-    S.arrowFor = st.upIdx;
-    maneuverArrow(st.up);
-    // Yapay zeka sesi: sıradaki "şimdi" cümlesini önceden hazırla, gecikme olmasın
-    if (st.up) voice.prefetch(G.speech(st.up, 'now', 0, st.then, st.gap));
-  }
+  if (st.upIdx !== S.arrowFor) { S.arrowFor = st.upIdx; maneuverArrow(st.up); }
   renderBanner(st);
 
   const remS = st.remS * (S.trafRatio && !walk ? Math.max(0.85, S.trafRatio) : 1);
   $('nav-eta').textContent = G.fmtClock(new Date(Date.now() + remS * 1000));
-  $('nav-rem').textContent = G.fmtDur(remS);
-  $('nav-km').textContent = G.fmtDist(st.remM);
+  setDur(remS, 'nav-rem', 'nav-rem-u');
+  setKm(st.remM);
   const kmh = Math.round((p.speed || 0) * 3.6);
   $('speed-val').textContent = kmh;
+
+  // Radar
+  let say = st.say;
+  if (say && S.navIntro) { say = `${S.navIntro} ${say}`; S.navIntro = null; }
+  const cam = store.prefs.radar ? S.navCams.find(c => c.along > st.along - 15 && c.along - st.along < 1000) : null;
+  let limit = st.limit;
+  if (cam?.max && cam.along - st.along < 600) limit = cam.max;
   const lim = $('speed-limit');
-  lim.hidden = !st.limit || walk;
-  if (st.limit) lim.textContent = st.limit;
-  $('nav-speed').classList.toggle('over', !walk && !!st.limit && kmh > st.limit + 5);
+  lim.hidden = !limit || walk;
+  if (limit) lim.textContent = limit;
+  const over = !walk && !!limit && kmh > limit + 4;
+  $('nav-speed').classList.toggle('over', over);
+
   const street = $('nav-street');
   street.hidden = !st.street || !S.follow;
   street.textContent = st.street;
 
-  // Yoldaki kaza / çalışma uyarısı
-  let say = st.say;
-  if (say && S.navIntro) { say = `${S.navIntro} ${say}`; S.navIntro = null; }
-  const ahead = S.navInc.find(i => i.along > st.along - 30 && i.along - st.along < 5000);
+  // Uyarı balonu: önce radar (yakınsa), sonra kaza/yol çalışması
   const al = $('nav-alert');
-  if (ahead) {
-    const dd = Math.max(0, ahead.along - st.along);
-    const dm = Math.round(ahead.delay / 60);
+  const inc = S.navInc.find(i => i.along > st.along - 30 && i.along - st.along < 5000);
+  if (cam) {
+    const dd = Math.max(0, cam.along - st.along);
     al.hidden = false;
-    al.className = `nav-alert m${Math.min(ahead.mag, 3)}`;
-    al.innerHTML = `<span class="na-emoji">${ahead.emoji}</span><span><b>${esc(ahead.label)}</b> · ${G.fmtDist(dd)}${dm >= 1 ? ` · +${dm} dk` : ''}</span>`;
-    if (dd < 1500 && !S.incSaid.has(ahead.id)) {
-      S.incSaid.add(ahead.id);
-      const t = `Dikkat, ileride ${ahead.label.toLocaleLowerCase('tr')} var${dm >= 1 ? `, yaklaşık ${dm} dakika gecikme` : ''}.`;
+    al.className = `nav-alert radar${over ? ' over' : ''}`;
+    al.innerHTML = `<span class="na-emoji">📷</span><span><b>Radar</b> · ${G.fmtDist(dd)}${cam.max ? ` · Sınır ${cam.max}` : ''}</span>`;
+    if (dd < 550 && !S.said.has('cam' + cam.id)) {
+      S.said.add('cam' + cam.id);
+      if (store.prefs.radarSound) radar.beep(over ? 3 : 2);
+      const t = `Radar var${cam.max ? `, hız sınırı ${cam.max}` : ''}.`;
+      say = say ? `${say} ${t}` : t;
+    }
+  } else if (inc) {
+    const dd = Math.max(0, inc.along - st.along);
+    const dm = Math.round(inc.delay / 60);
+    al.hidden = false;
+    al.className = `nav-alert m${Math.min(inc.mag, 3)}`;
+    al.innerHTML = `<span class="na-emoji">${inc.emoji}</span><span><b>${esc(inc.label)}</b> · ${G.fmtDist(dd)}${dm >= 1 ? ` · +${dm} dk` : ''}</span>`;
+    if (dd < 1500 && !S.said.has('inc' + inc.id)) {
+      S.said.add('inc' + inc.id);
+      if (store.prefs.radarSound) radar.beep(1);
+      const t = `Dikkat, ileride ${inc.label.toLocaleLowerCase('tr')} var${dm >= 1 ? `, yaklaşık ${dm} dakika gecikme` : ''}.`;
       say = say ? `${say} ${t}` : t;
     }
   } else al.hidden = true;
@@ -1062,11 +1148,15 @@ function navTick(p) {
   else if (!S.sim && !S.rerouting) $('nav-status').hidden = !st.offRoute;
   if (st.offRoute && !S.sim && !S.rerouting) { const s = $('nav-status'); s.className = 'nav-status'; s.textContent = 'Rotanın dışındasın'; delete s.dataset.act; }
 
+  // Yan düğmeler üst kartın hemen altında dursun (kart büyüyüp küçülünce çakışmasın)
+  const nb = Math.round($('nav').getBoundingClientRect().bottom + 12);
+  if (nb !== S.sideTop) { S.sideTop = nb; $('nav-side').style.top = nb + 'px'; }
+
   if (S.follow && S.map) {
     let z;
     if (walk) z = 18;
-    else z = st.distToNext < 220 ? 17.3 : p.speed > 22 ? 15.4 : p.speed > 13 ? 16.1 : 16.8;
-    S.map.easeTo({ center: [pp.lon, pp.lat], bearing: hd, pitch: store.prefs.tilt ? (walk ? 45 : 58) : 0, zoom: z, duration: S.sim ? 480 : 950, easing: t => t, padding: navPadding() });
+    else z = st.distToNext < 220 ? 17.3 : p.speed > 22 ? 15.6 : p.speed > 13 ? 16.2 : 16.8;
+    S.map.easeTo({ center: [pp.lon, pp.lat], bearing: hd, pitch: walk ? 45 : 60, zoom: z, duration: S.sim ? 480 : 950, easing: t => t, padding: navPadding() });
   }
 }
 
@@ -1082,6 +1172,8 @@ async function doReroute(p) {
     S.nav.setRoute(r);
     S.nav.started = true;
     S.arrowFor = -1; S.bannerFor = null;
+    S.navCams = r.mode === 'auto' ? radar.onRoute(allCams(), r) : [];
+    drawRadars();
     setJams([]);
     if (key() && r.mode === 'auto') { refreshNavIncidents(); refreshNavTraffic(); }
     voice.say('Rota güncellendi.');
@@ -1109,19 +1201,22 @@ function arrive() {
 
 function endNav() {
   S.sim?.stop(); S.sim = null;
-  S.nav = null; S.navRoute = null; S.bannerFor = null; S.navInc = [];
+  S.nav = null; S.navRoute = null; S.bannerFor = null; S.navInc = []; S.navCams = [];
   S.timers.forEach(clearInterval); S.timers = [];
   document.body.classList.remove('navigating');
+  closeNavMenu();
   for (const id of ['nav', 'nav-side', 'nav-speed', 'nav-bottom', 'nav-recenter', 'nav-street']) $(id).hidden = true;
   S.puck?.getElement().classList.remove('nav');
   keepAwake(false);
   voice.stop();
   store.activeNav = null; save();
   setRoutesData([]); setArrowData([]); setJams([]); setDest(null);
+  applyTheme();
+  drawRadars();
   if (S.map) {
     S.map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 });
     const c = S.pos ? [S.pos.lon, S.pos.lat] : S.map.getCenter();
-    S.map.easeTo({ center: c, pitch: store.prefs.tilt ? 50 : 0, bearing: 0, zoom: 16, duration: 800 });
+    S.map.easeTo({ center: c, pitch: store.prefs.tilt ? 50 : 0, bearing: 0, zoom: 15.5, duration: 800 });
   }
   if (S.pos) updatePuck(S.pos);
   renderWherePill();
@@ -1137,6 +1232,20 @@ function updateMuteBtn() {
   b.classList.toggle('off', !store.prefs.voice);
 }
 
+function renderNavMenu() {
+  const P = store.prefs;
+  $('nav-menu').innerHTML = `
+    <div class="list">
+      <button class="row" data-act="overview"><span class="row-icon c-blue">${I.route}</span><span class="row-main"><span class="row-title">Tüm rotayı gör</span></span></button>
+      <label class="row"><span class="row-icon c-gray">${I.speaker}</span><span class="row-main"><span class="row-title">Sesli yönlendirme</span></span><input type="checkbox" class="switch" data-pref="voice" ${P.voice ? 'checked' : ''}></label>
+      <label class="row"><span class="row-icon c-purple">${I.camera}</span><span class="row-main"><span class="row-title">Radar uyarı sesi</span></span><input type="checkbox" class="switch" data-pref="radarSound" ${P.radarSound ? 'checked' : ''}></label>
+      ${S.navRoute?.mode === 'auto' ? `<button class="row" data-act="reportRadar"><span class="row-icon c-purple">${I.plus}</span><span class="row-main"><span class="row-title">Burada radar var</span></span></button>` : ''}
+      <button class="row" data-act="shareEta"><span class="row-icon c-green">${I.share}</span><span class="row-main"><span class="row-title">Varış saatini paylaş</span></span></button>
+    </div>
+    <button class="end-route" data-act="endNav">Rotayı Bitir</button>`;
+}
+function closeNavMenu() { $('nav-menu').hidden = true; document.body.classList.remove('nav-menu-open'); }
+
 /* ================= Harita görünümü menüsü ================= */
 function renderLayers() {
   const P = store.prefs;
@@ -1148,12 +1257,13 @@ function renderLayers() {
     </div>
     <div class="list plain">
       <label class="row"><span class="row-main"><span class="row-title">3B görünüm</span><span class="row-sub">Binalar ve eğik bakış</span></span><input type="checkbox" class="switch" data-pref="tilt" ${P.tilt ? 'checked' : ''}></label>
+      <label class="row"><span class="row-main"><span class="row-title">Radarlar</span><span class="row-sub">Hız kameralarını göster ve uyar</span></span><input type="checkbox" class="switch" data-pref="radar" ${P.radar ? 'checked' : ''}></label>
       <label class="row"><span class="row-main"><span class="row-title">Trafik</span><span class="row-sub">${key() ? 'Yoğunluk, kaza ve yol çalışması' : 'Önce Ayarlar’dan TomTom’u bağla'}</span></span><input type="checkbox" class="switch" data-pref="traffic" ${P.traffic && key() ? 'checked' : ''} ${key() ? '' : 'disabled'}></label>
     </div>`;
 }
 
 /* ================= Ayarlar ================= */
-async function renderSettings() {
+function renderSettings() {
   const P = store.prefs;
   const seg = (v, l) => `<button class="${P.theme === v ? 'on' : ''}" data-act="theme" data-v="${v}">${l}</button>`;
   const favRow = (k, label, icon) => {
@@ -1164,36 +1274,27 @@ async function renderSettings() {
     : '<div class="empty">Henüz kayıtlı yer yok.</div>';
   const avoids = store.avoids.length ? store.avoids.map((a, i) => `<div class="row"><span class="row-icon c-red">${I.noentry}</span><span class="row-main"><span class="row-title">${esc(a.name || 'Yol')}</span><span class="row-sub">${esc(a.sub || '')}</span></span><button class="close" data-act="delAvoid" data-i="${i}" aria-label="Sil">${I.trash}</button></div>`).join('')
     : '<div class="empty">Henüz kaçındığın yol yok.</div>';
-
-  // Sesler
-  const dl = {};
-  for (const id of Object.keys(neural.VOICES)) dl[id] = await neural.isDownloaded(id);
-  const vrow = (id, name, sub) => {
-    const sel = P.voiceEngine === id;
-    const prog = S.dl[id];
-    const status = prog != null ? `İndiriliyor %${Math.round(prog * 100)}` : sub;
-    return `<div class="row voice-row">
-      <button class="radio ${sel ? 'on' : ''}" data-act="pickVoice" data-v="${id}" aria-label="Seç">${sel ? I.check : ''}</button>
-      <button class="row-main" data-act="pickVoice" data-v="${id}" style="text-align:left"><span class="row-title">${name}</span><span class="row-sub" id="vs-${id}">${status}</span></button>
-      <button class="pill-btn" data-act="testVoice" data-v="${id}">Dene</button>
-    </div>`;
-  };
-  const voices = vrow('system', 'Telefonun sesi', voice.v ? `${voice.v.name}` : 'Sistem sesi')
-    + Object.entries(neural.VOICES).map(([id, v]) => vrow(id, `${v.name} <span class="ai">Yapay zeka</span>`, `${v.desc} · ${dl[id] ? 'İndirildi' : '63 MB, bir kez iner'}`)).join('');
-
+  const myRadars = store.radars.length ? store.radars.map((r, i) => `<div class="row"><span class="row-icon c-purple">${I.camera}</span><span class="row-main"><span class="row-title">${esc(r.name || 'Radar')}</span><span class="row-sub">${new Date(r.t).toLocaleDateString('tr-TR')} tarihinde işaretlendi</span></span><button class="close" data-act="delRadar" data-i="${i}" aria-label="Sil">${I.trash}</button></div>`).join('')
+    : '<div class="empty">Henüz işaretlediğin radar yok.</div>';
   const icons = Object.entries(ICONS).map(([id, name]) => `<button class="icon-opt ${P.icon === id ? 'on' : ''}" data-act="pickIcon" data-v="${id}"><img src="icons/${id}-180.png" alt=""><span>${name}</span></button>`).join('');
 
   $('settings-body').innerHTML = `
     <div class="group-title">Görünüm</div>
     <div class="segmented">${seg('auto', 'Otomatik')}${seg('light', 'Açık')}${seg('dark', 'Koyu')}</div>
 
+    <div class="group-title">Radar</div>
+    <div class="list plain">
+      <label class="row"><span class="row-main"><span class="row-title">Radar uyarıları</span><span class="row-sub">${S.cams.length ? `Çevrende ${S.cams.length} radar biliniyor` : 'Radar verisi yükleniyor'}</span></span><input type="checkbox" class="switch" data-pref="radar" ${P.radar ? 'checked' : ''}></label>
+      <label class="row"><span class="row-main"><span class="row-title">Uyarı sesi</span><span class="row-sub">Sesli yönlendirme kapalıyken de kısa bir “bip” çalar</span></span><input type="checkbox" class="switch" data-pref="radarSound" ${P.radarSound ? 'checked' : ''}></label>
+    </div>
+    <div class="group-title">İşaretlediğin Radarlar</div>
+    <div class="list plain">${myRadars}</div>
+    <p class="group-foot">Radar konumları OpenStreetMap’ten gelir ve her yerde eksiksiz olmayabilir. Bilmediği bir radar görürsen navigasyonda kamera düğmesine bas ya da haritada o noktaya basılı tutup “Burada radar var”ı seç.</p>
+
     <div class="group-title">Sesli Yönlendirme</div>
     <div class="list plain">
-      <label class="row"><span class="row-main"><span class="row-title">Sesli yönlendirme</span></span><input type="checkbox" class="switch" data-pref="voice" ${P.voice ? 'checked' : ''}></label>
+      <label class="row"><span class="row-main"><span class="row-title">Sesli yönlendirme</span><span class="row-sub">${voice.v ? esc(voice.v.name) : 'Telefonun sesi'}</span></span><input type="checkbox" class="switch" data-pref="voice" ${P.voice ? 'checked' : ''}></label>
     </div>
-    <div class="group-title">Ses</div>
-    <div class="list plain">${voices}</div>
-    <p class="group-foot">Yapay zeka sesleri telefonun içinde çalışır, bir kez indirilir (Wi‑Fi önerilir). Telefonun kendi sesini güzelleştirmek istersen: iPhone Ayarlar › Erişilebilirlik › Seslendirilen İçerik › Sesler › Türkçe › <b>Yelda (Gelişmiş)</b>’i indir, Yolcu onu otomatik kullanır.</p>
 
     <div class="group-title">Trafik ve İşletme Arama</div>
     <div class="list plain">
@@ -1203,11 +1304,11 @@ async function renderSettings() {
       </div>
       ${key() ? '' : `<div class="row" style="gap:8px"><input id="tt-key" class="text-input" placeholder="API anahtarını yapıştır" autocomplete="off" autocapitalize="off" spellcheck="false"><button class="pill-btn blue" data-act="saveKey">Kaydet</button></div>`}
     </div>
-    ${key() ? '' : `<p class="group-foot"><b>Nasıl alınır (ücretsiz, kredi kartı yok):</b><br>1. <a href="https://developer.tomtom.com/user/register" target="_blank" rel="noopener">developer.tomtom.com</a>’da hesap aç.<br>2. Giriş yap, “Dashboard › Keys” bölümündeki anahtarı kopyala.<br>3. Buraya yapıştırıp Kaydet’e bas.<br>Günde 2.500 istek ücretsiz, kişisel kullanım için fazlasıyla yeter.</p>`}
+    ${key() ? '' : `<p class="group-foot"><b>Nasıl alınır (ücretsiz, kredi kartı yok):</b><br>1. <a href="https://developer.tomtom.com/user/register" target="_blank" rel="noopener">developer.tomtom.com</a>’da hesap aç.<br>2. Giriş yap, “Dashboard › Keys” bölümündeki anahtarı kopyala.<br>3. Buraya yapıştırıp Kaydet’e bas.</p>`}
 
     <div class="group-title">Uygulama Simgesi</div>
     <div class="icon-grid">${icons}</div>
-    <div class="list plain" style="margin-top:10px"><button class="row blue" data-act="applyIcon"><span class="row-icon c-blue">${I.copy}</span><span class="row-main"><span class="row-title">Simgeyi telefona uygula</span><span class="row-sub wrap">Bağlantıyı kopyalar ve adımları gösterir</span></span></button></div>
+    <div class="list plain" style="margin-top:12px"><button class="row blue" data-act="applyIcon"><span class="row-icon c-blue">${I.copy}</span><span class="row-main"><span class="row-title">Simgeyi telefona uygula</span><span class="row-sub wrap">Bağlantıyı kopyalar ve adımları gösterir</span></span></button></div>
     <div id="icon-steps"></div>
 
     <div class="group-title">Rota Tercihleri</div>
@@ -1231,50 +1332,20 @@ async function renderSettings() {
     <p class="group-foot">Ev, iş, kayıtlı yerler ve tercihlerin sadece bu telefonda saklanır, hiçbir sunucuya gönderilmez.</p>
 
     <div class="group-title">Hakkında</div>
-    <div class="list plain"><div class="row"><span class="row-main"><span class="row-title">Yolcu</span><span class="row-sub wrap">Harita © OpenStreetMap katkıcıları, OpenFreeMap. Arazi © Mapterhorn. Uydu © Esri, Maxar. Rota: Valhalla (FOSSGIS). Arama: Photon, Nominatim${key() ? ', TomTom' : ''}. Ses: Piper.</span></span></div></div>`;
-}
-
-async function pickVoice(id) {
-  if (id === 'system' || await neural.isDownloaded(id)) {
-    store.prefs.voiceEngine = id; save();
-    if (id !== 'system') neural.load(id).catch(() => toast('Ses yüklenemedi'));
-    renderSettings();
-    return;
-  }
-  if (S.dl[id] != null) return;
-  S.dl[id] = 0; renderSettings();
-  try {
-    await neural.download(id, p => { S.dl[id] = p; const el = $(`vs-${id}`); if (el) el.textContent = `İndiriliyor %${Math.round(p * 100)}`; });
-    delete S.dl[id];
-    store.prefs.voiceEngine = id; save();
-    await neural.load(id);
-    toast(`${neural.VOICES[id].name} hazır`);
-    voice.unlock();
-    voice.say('Merhaba, ben Yolcu. Seni rahat yoldan götüreceğim.', true, id);
-  } catch {
-    delete S.dl[id];
-    toast('İndirme başarısız. İnternet bağlantını kontrol et.');
-  }
-  renderSettings();
-}
-
-async function testVoice(id) {
-  voice.unlock();
-  const text = '300 metre sonra sağa dönün ve Yeşildere Caddesi’ne girin.';
-  if (id === 'system') { voice.sys(text); return; }
-  if (!(await neural.isDownloaded(id))) { pickVoice(id); return; }
-  const el = $(`vs-${id}`); const old = el?.textContent;
-  if (el) el.textContent = 'Hazırlanıyor…';
-  try { await neural.load(id); await neural.speak(text); } catch { toast('Ses çalınamadı'); }
-  if (el) el.textContent = old;
-  // Seçili ses farklıysa onu geri yükle
-  const sel = store.prefs.voiceEngine;
-  if (sel !== 'system' && sel !== id) setTimeout(() => neural.load(sel).catch(() => { }), 4000);
+    <div class="list plain"><div class="row"><span class="row-main"><span class="row-title">Yolcu</span><span class="row-sub wrap">Harita © OpenStreetMap katkıcıları, OpenFreeMap. Arazi © Mapterhorn. Uydu © Esri, Maxar. Rota: Valhalla (FOSSGIS). Arama: Photon, Nominatim${key() ? ', TomTom' : ''}. Hava: Open‑Meteo. Radar: OpenStreetMap.</span></span></div></div>`;
 }
 
 function applyIconLink() {
   const link = document.querySelector('link[rel=apple-touch-icon]');
   if (link) link.href = `icons/${store.prefs.icon || 'mavi'}-180.png`;
+}
+
+function addRadarAt(lat, lon, name) {
+  store.radars.push({ lat, lon, name: name || 'Radar', t: Date.now() });
+  save();
+  if (S.nav) S.navCams = radar.onRoute(allCams(), S.navRoute);
+  drawRadars();
+  toast('Radar işaretlendi, buradan geçerken uyaracağım');
 }
 
 /* ================= Eylemler ================= */
@@ -1285,7 +1356,7 @@ const ACT = {
   recent: el => { const p = store.recents[+el.dataset.i]; if (p) showPlace(p); },
   fav: el => {
     const k = el.dataset.k;
-    if (store[k]) openRoutes({ ...store[k], name: k === 'home' ? 'Ev' : 'İş', sub: store[k].name });
+    if (store[k]) openRoutes({ ...store[k], name: k === 'home' ? 'Ev' : 'İş', sub: store[k].name, kind: k });
     else { S.pickFor = k; openSearch(); }
   },
   favPlace: el => { const p = store.places[+el.dataset.i]; if (p) showPlace(p); },
@@ -1304,6 +1375,8 @@ const ACT = {
     toast('Tamam, seni bir daha bu yoldan geçirmeyeceğim');
     goHome();
   },
+  radarHere: () => { const p = S.place; addRadarAt(p.lat, p.lon, p.road || p.name); goHome(); },
+  reportRadar: () => { if (!S.pos) return; addRadarAt(S.pos.lat, S.pos.lon, S.nav ? $('nav-street').textContent : (S.where?.road || 'Radar')); closeNavMenu(); },
   closeRoutes: () => { S.planAbort?.abort(); S.routes = []; setRoutesData([]); setJams([]); clearChips(); if (S.place) showPlace(S.place); else goHome(); },
   replan: () => planRoutes(),
   travel: el => { if (S.travel === el.dataset.v) return; S.travel = el.dataset.v; planRoutes(); },
@@ -1318,15 +1391,29 @@ const ACT = {
   go: el => startNav(+el.dataset.i),
   preview: el => startNav(+el.dataset.i, true),
   endNav: () => endNav(),
+  toggleNavMenu: () => {
+    const m = $('nav-menu');
+    if (m.hidden) { renderNavMenu(); m.hidden = false; document.body.classList.add('nav-menu-open'); }
+    else closeNavMenu();
+  },
+  shareEta: async () => {
+    const r = S.routes[S.sel];
+    const t = S.nav ? $('nav-eta').textContent : (r ? G.fmtClock(new Date(Date.now() + rtime(r) * 1000)) : null);
+    if (!t || !S.dest) return;
+    let text = `${G.suffix(S.dest.name, 'loc')} yaklaşık ${t}’de olacağım.`;
+    text = text.charAt(0).toLocaleUpperCase('tr') + text.slice(1);
+    try { if (navigator.share) await navigator.share({ text }); else { await navigator.clipboard.writeText(text); toast('Kopyalandı'); } } catch { }
+  },
   recenter: () => { S.follow = true; $('nav-recenter').hidden = true; if (S.pos) navTick(S.pos); },
   overview: () => {
     if (!S.navRoute) return;
+    closeNavMenu();
     S.follow = false;
     $('nav-recenter').hidden = false; $('nav-street').hidden = true;
     const r = S.navRoute, st = S.nav;
     const c = sliceAlong(r.coords, r.cum, st.along, r.lengthM);
     const top = $('nav').getBoundingClientRect().bottom + 20;
-    fitCoords(c, { padding: { top, bottom: 140 + safeB(), left: wide() ? 460 : 40, right: 70 } });
+    fitCoords(c, { padding: { top, bottom: 150 + safeB(), left: wide() ? 470 : 40, right: 80 } });
   },
   toggleVoice: () => {
     store.prefs.voice = !store.prefs.voice; save(); updateMuteBtn();
@@ -1336,12 +1423,11 @@ const ACT = {
   simSpeed: () => { if (!S.sim) return; const f = [1, 3, 8]; S.sim.factor = f[(f.indexOf(S.sim.factor) + 1) % f.length]; showSimStatus(); },
   locate: () => {
     if (!S.pos) { toast('Konumun bekleniyor…'); return; }
-    S.map.easeTo({ center: [S.pos.lon, S.pos.lat], zoom: Math.max(S.map.getZoom(), 16), bearing: 0, pitch: store.prefs.tilt ? 50 : 0, duration: 700, padding: { top: 0, bottom: wide() ? 0 : sheet.visible() * 0.5, left: wide() ? 420 : 0, right: 0 } });
+    S.map.easeTo({ center: [S.pos.lon, S.pos.lat], zoom: Math.max(S.map.getZoom(), 16), bearing: 0, pitch: store.prefs.tilt ? 50 : 0, duration: 700, padding: { top: 0, bottom: wide() ? 0 : sheet.visible() * 0.5, left: wide() ? 430 : 0, right: 0 } });
   },
   openLayers: () => { renderLayers(); $('layers').hidden = false; },
   closeLayers: () => { $('layers').hidden = true; },
   mapType: el => { store.prefs.mapType = el.dataset.v; save(); applyTheme(); renderLayers(); },
-  incident: () => { },
   openWhere: () => { S.view = 'where'; render(); sheet.set('half'); },
   copyCoords: async () => { const p = S.pos; if (!p) return; try { await navigator.clipboard.writeText(`${p.lat.toFixed(6)}, ${p.lon.toFixed(6)}`); toast('Koordinatlar kopyalandı'); } catch { toast('Kopyalanamadı'); } },
   shareMe: () => { const p = S.pos; if (!p) return; const r = S.where || {}; sharePlace({ name: r.road || 'Konumum', sub: [r.hood, r.district].filter(Boolean).join(', '), lat: p.lat, lon: p.lon }); },
@@ -1361,8 +1447,6 @@ const ACT = {
   openSettings: () => { renderSettings(); $('settings').hidden = false; $('layers').hidden = true; },
   closeSettings: () => { $('settings').hidden = true; render(); },
   theme: el => { store.prefs.theme = el.dataset.v; save(); applyTheme(); renderSettings(); },
-  pickVoice: el => pickVoice(el.dataset.v),
-  testVoice: el => testVoice(el.dataset.v),
   saveKey: async () => {
     const v = ($('tt-key')?.value || '').trim();
     if (!v) return;
@@ -1377,7 +1461,7 @@ const ACT = {
   },
   removeKey: () => { store.tomtomKey = null; save(); setFlow(); S.incidents = []; drawIncidents(); renderSettings(); },
   pickIcon: el => { store.prefs.icon = el.dataset.v; save(); applyIconLink(); renderSettings(); },
-  applyIcon: async () => {
+  applyIcon: () => {
     const url = `${location.origin}${location.pathname}?icon=${store.prefs.icon}#r=${packForLink()}`;
     navigator.clipboard?.writeText(url).catch(() => { });
     $('icon-steps').innerHTML = `<div class="steps-box">
@@ -1393,6 +1477,7 @@ const ACT = {
   setFav: el => { $('settings').hidden = true; S.pickFor = el.dataset.k; openSearch(); },
   delPlace: el => { store.places.splice(+el.dataset.i, 1); save(); renderSettings(); },
   delAvoid: el => { store.avoids.splice(+el.dataset.i, 1); save(); renderSettings(); toast('Kaldırıldı'); },
+  delRadar: el => { store.radars.splice(+el.dataset.i, 1); save(); drawRadars(); renderSettings(); toast('Kaldırıldı'); },
   backup: () => {
     const blob = new Blob([exportBackup()], { type: 'application/json' });
     const a = document.createElement('a');
@@ -1425,9 +1510,11 @@ document.addEventListener('change', e => {
   if (!k) return;
   store.prefs[k] = e.target.checked;
   save();
-  if (k === 'voice') updateMuteBtn();
+  if (k === 'voice') { updateMuteBtn(); if (!store.prefs.voice) voice.stop(); }
+  else if (k === 'radarSound') { if (store.prefs.radarSound) { radar.unlockBeep(); radar.beep(1); } }
   else if (k === 'tilt') { if (!S.nav) S.map?.easeTo({ pitch: store.prefs.tilt ? 50 : 0, duration: 600 }); }
   else if (k === 'traffic') { setFlow(); if (store.prefs.traffic) loadIncidents(true); else { S.incidents = []; drawIncidents(); } }
+  else if (k === 'radar') { if (store.prefs.radar && S.pos) loadRadars(S.pos); drawRadars(); }
   else if (S.view === 'routes' && S.dest && !S.nav) planRoutes();
   if (!$('settings').hidden) renderSettings();
 });
@@ -1443,16 +1530,13 @@ $('file-import').addEventListener('change', async e => {
 /* ================= Başlat ================= */
 function readUrl() {
   const q = new URLSearchParams(location.search);
-  // Simge seçimi bağlantısı: ?icon=yol
   if (q.get('icon') && ICONS[q.get('icon')]) { store.prefs.icon = q.get('icon'); save(); }
-  // TomTom anahtarı bağlantıyla gelebilir: ?tomtom=ANAHTAR
   if (q.get('tomtom')) {
     store.tomtomKey = q.get('tomtom'); save();
     q.delete('tomtom');
     history.replaceState(null, '', location.pathname + (q.toString() ? '?' + q : '') + location.hash);
     setTimeout(() => toast('TomTom bağlandı'), 800);
   }
-  // Ayarları taşıyan bağlantı: #r=... (sadece bu cihazda boşsa uygula)
   const m = location.hash.match(/#r=([\w-]+)/);
   if (m && !store.home && !store.work && !store.places.length) {
     try { unpackFromLink(m[1]); setTimeout(() => toast('Ayarların geri yüklendi'), 800); } catch { }
@@ -1464,12 +1548,11 @@ function boot() {
   applyIconLink();
   applyTheme();
   $('btn-locate').innerHTML = I.locLine;
-  $('btn-layers').innerHTML = I.layers;
-  $('btn-settings').innerHTML = I.gear;
+  $('btn-layers').innerHTML = I.map;
   sheet.init();
   render();
   requestAnimationFrame(() => sheet.set('peek', false));
-  setTimeout(() => { setAppH(); sheet.set(sheet.detent, false); }, 400);
+  setTimeout(() => { fitScreen(); sheet.set(sheet.detent, false); }, 400);
   voice.init();
   initMap();
   startGeo();

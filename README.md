@@ -15,6 +15,10 @@ Seni **rahat yoldan** götüren navigasyon. iPhone'da Safari'den açılıp ana e
 - **Rotadan çıkınca:** Önce seni aynı yola geri bağlamayı dener, ancak o çok uzarsa yeni rota çizer.
 - **Bu yoldan beni geçirme:** Haritada bir yola basılı tut. Yolcu seni bir daha oradan geçirmez.
 - **Neredeyim:** Cadde, mahalle, ilçe, hız, yön ve rakım gösterir. Navigasyonda hız limiti tabelası ve bulunduğun yolun adı görünür.
+- **Hangi yoldan?** Rotayı metro hattı gibi gösterir (Yeşildere Caddesi › Altınyol › Ankara Caddesi) ve istersen sesli anlatır.
+- **Radar:** OpenStreetMap’teki hız kameraları ve senin işaretlediklerin. Ses kapalıyken de kısa bir uyarı sesi çalar.
+- **Trafik (TomTom anahtarıyla):** canlı yoğunluk, kaza/yol çalışması uyarıları, trafikli varış ve işletme arama.
+- **Yürüyüş** modu (kısa mesafeler için), uydu görünümü, arazi gölgeleri, hava durumu.
 - **Önizle:** Rotayı gitmeden önce sanal olarak sürüp görebilirsin.
 - Ev, iş, favoriler, son kullanılanlar, açık/koyu tema ve yedek alma/geri yükleme.
 
@@ -34,10 +38,13 @@ Tüm kişisel veriler (ev, iş, favoriler) **sadece telefonda** saklanır. Kodda
 |---|---|
 | Harita | [OpenFreeMap](https://openfreemap.org) + MapLibre GL |
 | Rota, yol analizi | [Valhalla](https://valhalla1.openstreetmap.de) (FOSSGIS) |
-| Arama | [Photon](https://photon.komoot.io), [Nominatim](https://nominatim.openstreetmap.org) |
+| Arama | [Photon](https://photon.komoot.io), [Nominatim](https://nominatim.openstreetmap.org), TomTom (isteğe bağlı) |
+| Radar | OpenStreetMap (Overpass) |
+| Hava | [Open-Meteo](https://open-meteo.com) |
+| Arazi / Uydu | [Mapterhorn](https://mapterhorn.com), Esri World Imagery |
 | Veri | © OpenStreetMap katkıcıları |
 
-API anahtarı ve üyelik gerekmez.
+Trafik dışındaki her şey anahtarsız ve üyeliksiz çalışır.
 
 ## Geliştirme
 
@@ -49,6 +56,8 @@ Dosyalar:
 - `js/app.js`: arayüz ve akış
 - `js/api.js`: rota, arama ve yol analizi
 - `js/nav.js`: navigasyon motoru ve simülatör
-- `js/guide.js`: Türkçe yönlendirme metinleri ve oklar
+- `js/guide.js`: Türkçe yönlendirme metinleri, ekler, güzergah özeti ve oklar
+- `js/traffic.js`: TomTom trafik, olaylar ve işletme arama
+- `js/radar.js`: radar verisi ve uyarı sesi
 - `js/mapstyle.js`: Apple tarzı harita renkleri
 - `sw.js`: çevrimdışı önbellek

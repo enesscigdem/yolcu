@@ -16,50 +16,51 @@
   <link rel="stylesheet" href="app.css">
 </head>
 <body>
+<div id="app">
   <div id="map"></div>
 
-  <!-- Üstte: neredeyim -->
+  <!-- Üst sol: neredeyim + hava -->
   <button id="where-pill" class="glass where-pill" data-act="openWhere" hidden>
-    <span class="where-dot"></span>
     <span class="where-text"><b id="where-road">Konum alınıyor…</b><small id="where-area"></small></span>
+    <span id="weather" class="weather" hidden></span>
   </button>
 
-  <!-- Sağ üst kontroller -->
+  <!-- Sağ üst kapsül -->
   <div id="controls" class="glass controls">
-    <button id="btn-locate" data-act="locate" aria-label="Konumuma git"></button>
-    <span class="ctl-sep"></span>
     <button id="btn-layers" data-act="openLayers" aria-label="Harita görünümü"></button>
     <span class="ctl-sep"></span>
-    <button id="btn-settings" data-act="openSettings" aria-label="Ayarlar"></button>
+    <button id="btn-locate" data-act="locate" aria-label="Konumuma git"></button>
   </div>
 
-  <!-- Harita görünümü menüsü -->
-  <div id="layers" class="glass layers" hidden></div>
+  <div id="layers" class="layers" hidden></div>
 
   <!-- Alt panel -->
-  <section id="sheet" class="sheet glass" data-detent="peek">
+  <section id="sheet" class="sheet" data-detent="peek">
     <div class="grab-area"><div class="grabber"></div></div>
     <div id="sheet-body" class="sheet-body"></div>
   </section>
 
   <!-- Navigasyon -->
   <div id="nav" class="nav" hidden>
-    <div class="nav-banner" id="nav-banner">
-      <div id="nav-icon" class="nav-icon"></div>
-      <div class="nav-text">
-        <div id="nav-dist" class="nav-dist"></div>
-        <div id="nav-action" class="nav-action"></div>
-        <div id="nav-road" class="nav-road"></div>
+    <div class="nav-card">
+      <div class="nav-main">
+        <div id="nav-icon" class="nav-icon"></div>
+        <div class="nav-text">
+          <div id="nav-dist" class="nav-dist"></div>
+          <div id="nav-action" class="nav-action"></div>
+          <div id="nav-road" class="nav-road"></div>
+        </div>
       </div>
+      <div id="nav-then" class="nav-then" hidden></div>
     </div>
-    <div id="nav-then" class="nav-then" hidden></div>
     <div id="nav-alert" class="nav-alert" hidden></div>
     <div id="nav-status" class="nav-status" hidden></div>
   </div>
 
   <div id="nav-side" class="nav-side" hidden>
-    <button id="nav-mute" class="glass round" data-act="toggleVoice" aria-label="Ses"></button>
     <button id="nav-overview" class="glass round" data-act="overview" aria-label="Genel bakış"></button>
+    <button id="nav-mute" class="glass round" data-act="toggleVoice" aria-label="Ses"></button>
+    <button id="nav-radar" class="glass round" data-act="reportRadar" aria-label="Radar bildir"></button>
   </div>
 
   <div id="nav-speed" class="speed glass" hidden>
@@ -70,18 +71,19 @@
   <button id="nav-recenter" class="glass recenter" data-act="recenter" hidden>Ortala</button>
   <div id="nav-street" class="street-pill" hidden></div>
 
-  <div id="nav-bottom" class="nav-bottom glass" hidden>
-    <div class="nav-stats">
-      <div class="stat"><b id="nav-eta">--:--</b><small>varış</small></div>
-      <div class="stat"><b id="nav-rem">--</b><small>kalan</small></div>
-      <div class="stat"><b id="nav-km">--</b><small>mesafe</small></div>
-    </div>
-    <button class="end-btn" data-act="endNav">Bitir</button>
+  <div id="nav-bottom" class="nav-bottom" hidden>
+    <div class="grabber"></div>
+    <button class="nav-stats" data-act="toggleNavMenu" aria-label="Seçenekler">
+      <span class="stat eta"><b id="nav-eta">--:--</b><small>varış</small></span>
+      <span class="stat"><b id="nav-rem">--</b><small id="nav-rem-u">dk</small></span>
+      <span class="stat"><b id="nav-km">--</b><small id="nav-km-u">km</small></span>
+    </button>
+    <div id="nav-menu" class="nav-menu" hidden></div>
   </div>
 
   <!-- Ayarlar -->
   <div id="settings" class="page" hidden>
-    <div class="page-head glass-flat">
+    <div class="page-head">
       <button class="link" data-act="closeSettings">Kapat</button>
       <h1>Ayarlar</h1>
       <span></span>
@@ -89,8 +91,9 @@
     <div id="settings-body" class="page-body"></div>
   </div>
 
-  <div id="toast" class="toast glass" hidden></div>
+  <div id="toast" class="toast" hidden></div>
   <input id="file-import" type="file" accept="application/json,.json" hidden>
+</div>
 
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <script type="module" src="js/app.js"></script>

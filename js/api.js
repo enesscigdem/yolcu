@@ -326,3 +326,13 @@ export async function reroute(from, to, oldRoute, along, prefs, avoids) {
   pick.story = story(pick);
   return pick;
 }
+
+/* ---------------- Hava durumu (Open-Meteo, anahtarsız) ---------------- */
+const WMO = [[[0], '☀️', '🌙'], [[1, 2], '🌤️', '☁️'], [[3], '☁️', '☁️'], [[45, 48], '🌫️', '🌫️'], [[51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82], '🌧️', '🌧️'], [[71, 73, 75, 77, 85, 86], '❄️', '❄️'], [[95, 96, 99], '⛈️', '⛈️']];
+export async function weather(lat, lon) {
+  const u = `https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(3)}&longitude=${lon.toFixed(3)}&current=temperature_2m,weather_code,is_day&timezone=auto`;
+  const j = await fetch(u).then(r => r.json());
+  const c = j.current;
+  const row = WMO.find(([codes]) => codes.includes(c.weather_code)) || WMO[2];
+  return { temp: Math.round(c.temperature_2m), icon: c.is_day ? row[1] : row[2], code: c.weather_code };
+}
