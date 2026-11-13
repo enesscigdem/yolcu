@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Yolcu">
+  <meta name="format-detection" content="telephone=no">
+  <meta name="theme-color" content="#F3F1EC">
+  <title>Yolcu</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="icon" type="image/png" href="icons/icon-192.png">
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <div id="map"></div>
+
+  <!-- Üstte: neredeyim -->
+  <button id="where-pill" class="glass where-pill" data-act="openWhere" hidden>
+    <span class="where-dot"></span>
+    <span class="where-text"><b id="where-road">Konum alınıyor…</b><small id="where-area"></small></span>
+  </button>
+
+  <!-- Sağ üst kontroller -->
+  <div id="controls" class="glass controls">
+    <button id="btn-locate" data-act="locate" aria-label="Konumuma git"></button>
+    <span class="ctl-sep"></span>
+    <button id="btn-3d" data-act="toggle3d" aria-label="3B görünüm" class="ctl-text">3B</button>
+    <span class="ctl-sep"></span>
+    <button id="btn-settings" data-act="openSettings" aria-label="Ayarlar"></button>
+  </div>
+
+  <!-- Alt panel -->
+  <section id="sheet" class="sheet glass" data-detent="peek">
+    <div class="grab-area"><div class="grabber"></div></div>
+    <div id="sheet-body" class="sheet-body"></div>
+  </section>
+
+  <!-- Navigasyon -->
+  <div id="nav" class="nav" hidden>
+    <div class="nav-banner" id="nav-banner">
+      <div id="nav-icon" class="nav-icon"></div>
+      <div class="nav-text">
+        <div id="nav-dist" class="nav-dist"></div>
+        <div id="nav-action" class="nav-action"></div>
+        <div id="nav-road" class="nav-road"></div>
+      </div>
+    </div>
+    <div id="nav-then" class="nav-then" hidden></div>
+    <div id="nav-status" class="nav-status" hidden></div>
+  </div>
+
+  <div id="nav-side" class="nav-side" hidden>
+    <button id="nav-mute" class="glass round" data-act="toggleVoice" aria-label="Ses"></button>
+    <button id="nav-overview" class="glass round" data-act="overview" aria-label="Genel bakış"></button>
+  </div>
+
+  <div id="nav-speed" class="speed glass" hidden>
+    <div id="speed-limit" class="limit" hidden></div>
+    <div class="speed-now"><b id="speed-val">0</b><small>km/sa</small></div>
+  </div>
+
+  <button id="nav-recenter" class="glass recenter" data-act="recenter" hidden>Ortala</button>
+  <div id="nav-street" class="street-pill" hidden></div>
+
+  <div id="nav-bottom" class="nav-bottom glass" hidden>
+    <div class="nav-stats">
+      <div class="stat"><b id="nav-eta">--:--</b><small>varış</small></div>
+      <div class="stat"><b id="nav-rem">--</b><small>kalan</small></div>
+      <div class="stat"><b id="nav-km">--</b><small>mesafe</small></div>
+    </div>
+    <button class="end-btn" data-act="endNav">Bitir</button>
+  </div>
+
+  <!-- Ayarlar -->
+  <div id="settings" class="page" hidden>
+    <div class="page-head glass-flat">
+      <button class="link" data-act="closeSettings">Kapat</button>
+      <h1>Ayarlar</h1>
+      <span></span>
+    </div>
+    <div id="settings-body" class="page-body"></div>
+  </div>
+
+  <div id="toast" class="toast glass" hidden></div>
+  <input id="file-import" type="file" accept="application/json,.json" hidden>
+
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
