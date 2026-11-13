@@ -64,6 +64,31 @@ export async function around(lat, lon) {
 
 export function cached() { return readCache()?.list || []; }
 
+// Emniyet Genel Müdürlüğü'nün resmi EDS noktaları (uygulamayla gelir, GitHub haftalık günceller)
+let officialP = null;
+export function official() {
+  if (!officialP) {
+    officialP = fetch('data/radars-tr.json')
+      .then(r => r.json())
+      .then(d => d.points.map(([lat, lon, desc], i) => ({ id: 'egm' + i, lat, lon, max: null, dir: null, desc, src: 'egm' })))
+      .catch(() => { officialP = null; return []; });
+  }
+  return officialP;
+}
+
+// Listeleri birleştir; 40 m içindeki aynı radarı tekle (hız sınırı ve açıklaması olanı koru)
+export function merge(...lists) {
+  const out = [];
+  for (const list of lists) for (const c of list) {
+    const dup = out.find(o => Math.abs(o.lat - c.lat) < 0.0005 && Math.abs(o.lon - c.lon) < 0.0006 && dist(o.lon, o.lat, c.lon, c.lat) < 40);
+    if (dup) { if (!dup.max && c.max) dup.max = c.max; if (!dup.desc && c.desc) dup.desc = c.desc; continue; }
+    out.push({ ...c });
+  }
+  return out;
+}
+
+export const inBox = (list, [w, s, e, n]) => list.filter(c => c.lon >= w && c.lon <= e && c.lat >= s && c.lat <= n);
+
 // Rotanın üzerindeki radarlar (35 m yakın ve yön uyuşuyorsa)
 export function onRoute(cams, route) {
   const { coords, cum } = route;

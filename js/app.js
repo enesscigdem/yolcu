@@ -2,7 +2,7 @@ import { store, save, addRecent, isSaved, toggleSaved, exportBackup, importBacku
 import * as api from './api.js';
 import * as traffic from './traffic.js';
 import * as radar from './radar.js';
-import { loadStyle, applyPalette, PALETTES, firstLabelLayer } from './mapstyle.js';
+import { loadStyle, applyPalette, setTerrain, PALETTES, ACCENT, firstLabelLayer } from './mapstyle.js';
 import * as G from './guide.js';
 import { Navigator, Simulator } from './nav.js';
 import { I, KIND_ICON } from './icons.js';
@@ -18,31 +18,29 @@ const TRAVEL = { auto: ['Araba', 'car'], pedestrian: ['Yürüyüş', 'walk'] };
 
 // Eski sürümden gelen ayarları güncelle
 if (!store.prefs.v3) {
-  store.prefs.tilt = false;           // gezinirken düz harita (Apple gibi), navigasyonda 3B
+  store.prefs.tilt = false;
   store.prefs.radar = true;
   store.prefs.radarSound = true;
   delete store.prefs.voiceEngine;
   store.prefs.v3 = true;
-  if (!Array.isArray(store.radars)) store.radars = [];
   save();
 }
 if (!Array.isArray(store.radars)) store.radars = [];
 
 const S = {
   map: null, mapReady: false, pos: null, firstFix: true, puck: null, destMarker: null,
-  view: 'home', place: null, results: null, routes: [], sel: 0, dest: null, routeErr: null, travel: 'auto',
+  view: 'home', place: null, results: null, routes: [], sel: 0, details: false, dest: null, routeErr: null, travel: 'auto',
   pickFor: null, nav: null, navRoute: null, sim: null, follow: true, rerouting: false,
   where: null, whereAt: null, whereBusy: false, wake: null, arrowFor: -1, arrived: false,
   dragEnd: 0, autoStart: false, chips: [], incidents: [], incAt: null, navInc: [], said: new Set(),
   trafRatio: null, timers: [], navIntro: null, incident: null,
-  cams: [], navCams: [], weather: null, weatherAt: null
+  cams: [], official: [], navCams: [], weather: null, weatherAt: null
 };
 const key = () => store.tomtomKey;
 const theme = () => { const p = store.prefs.theme; return p === 'auto' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : p; };
 
 /* ================= iOS ekran boyu ================= */
 // iOS 26 ana ekran uygulamasında görünüm, durum çubuğu kadar kısa geliyor (WebKit 301108).
-// CSS'te düzeltiyoruz; burada da yedek olarak ekran boyunu zorluyoruz.
 const probeT = document.createElement('div');
 probeT.style.cssText = 'position:absolute;left:0;top:0;width:1px;height:env(safe-area-inset-top);visibility:hidden;pointer-events:none';
 const probeB = document.createElement('div');
@@ -55,11 +53,8 @@ function fitScreen() {
   const standalone = navigator.standalone || matchMedia('(display-mode: standalone)').matches;
   const portrait = window.innerWidth < window.innerHeight;
   const html = document.documentElement;
-  if (standalone && portrait && screen.height - window.innerHeight > 8 && screen.height - window.innerHeight < 160) {
-    html.style.height = screen.height + 'px';
-  } else if (standalone) {
-    html.style.height = '';
-  }
+  if (standalone && portrait && screen.height - window.innerHeight > 8 && screen.height - window.innerHeight < 160) html.style.height = screen.height + 'px';
+  else if (standalone) html.style.height = '';
   if (window.scrollY) window.scrollTo(0, 0);
 }
 function onViewport() {
@@ -79,8 +74,13 @@ document.addEventListener('focusout', () => setTimeout(() => { window.scrollTo(0
 const mq = matchMedia('(prefers-color-scheme: dark)');
 function applyTheme() {
   const t = theme();
-  document.documentElement.dataset.theme = t;
-  if (S.mapReady) { applyPalette(S.map, PALETTES[t], { type: store.prefs.mapType, nav: !!S.nav }); setFlow(); }
+  document.documentElement.dataset.map = t;
+  if (!S.mapReady) return;
+  applyPalette(S.map, PALETTES[t], { type: store.prefs.mapType, nav: !!S.nav });
+  // 3B arazi sadece gezinirken: navigasyonda MapLibre 4 kamerayı deniz seviyesine göre hesapladığından
+  // konum oku arazinin üstünde kayıyor; ayrıca iPhone'da navigasyon daha akıcı oluyor.
+  setTerrain(S.map, !!(store.prefs.tilt && !S.nav));
+  setFlow();
 }
 mq.addEventListener?.('change', applyTheme);
 
@@ -144,19 +144,19 @@ const sheet = {
   H() { return this.el.offsetHeight; },
   peekH() {
     const a = this.body.querySelector('[data-peek]');
-    if (!a) return 220;
+    if (!a) return 200;
     const r = a.getBoundingClientRect(), s = this.el.getBoundingClientRect();
-    return Math.round(r.bottom - s.top + 16 + safeB());
+    return Math.round(r.bottom - s.top + 14 + safeB());
   },
   heights() {
     const H = this.H();
-    return { peek: Math.min(this.peekH(), H), half: Math.min(Math.max(Math.round(H * 0.56), this.peekH()), H), full: H };
+    return { peek: Math.min(this.peekH(), H), half: Math.min(Math.max(Math.round(H * 0.55), this.peekH()), H), full: H };
   },
   set(d, anim = true) {
     this.detent = d;
     const vis = this.heights()[d];
     this.y = Math.max(0, this.H() - vis);
-    this.el.style.transition = anim ? 'transform .55s cubic-bezier(.32,.72,0,1)' : 'none';
+    this.el.style.transition = anim ? 'transform .45s cubic-bezier(.32,.72,0,1)' : 'none';
     this.el.style.transform = `translateY(${this.y}px)`;
     this.el.dataset.detent = d;
     if (d !== 'full') this.body.scrollTop = 0;
@@ -210,9 +210,38 @@ const sheet = {
 };
 
 /* ================= Harita ================= */
-// Apple tarzı navigasyon oku: beyaz çerçeveli mavi daire içinde beyaz ok
-const NAV_ARROW = '<svg viewBox="0 0 56 56"><circle cx="28" cy="28" r="23" fill="#0A84FF" stroke="#fff" stroke-width="4.5"/><path d="M28 14 L38.5 38 L28 32.5 L17.5 38 Z" fill="#fff" stroke="#fff" stroke-width="2" stroke-linejoin="round"/></svg>';
-const PIN = '<svg viewBox="0 0 40 48"><path d="M20 47s-16-15-16-27a16 16 0 0 1 32 0c0 12-16 27-16 27z" fill="#FF3B30" stroke="#fff" stroke-width="2.5"/><circle cx="20" cy="20" r="6.5" fill="#fff"/></svg>';
+const NAV_ARROW = `<svg viewBox="0 0 56 56"><circle cx="28" cy="28" r="23" fill="#16171A" stroke="#fff" stroke-width="3.5"/><path d="M28 13.5 L39 39 L28 33 L17 39 Z" fill="${ACCENT}" stroke="${ACCENT}" stroke-width="2" stroke-linejoin="round"/></svg>`;
+const PIN = `<svg viewBox="0 0 34 42"><path d="M17 41s-14-12.6-14-23.5a14 14 0 0 1 28 0C31 28.4 17 41 17 41z" fill="#16171A" stroke="#fff" stroke-width="2"/><circle cx="17" cy="17.5" r="5.5" fill="${ACCENT}"/></svg>`;
+
+// Harita simgeleri: emoji yerine sade çizimler (koyu daire + ince halka + beyaz/renkli sembol)
+const GLYPH = {
+  camera: 'M9.2 4.5h5.6l1.5 2H19a2.5 2.5 0 0 1 2.5 2.5v8.5A2.5 2.5 0 0 1 19 20H5a2.5 2.5 0 0 1-2.5-2.5V9A2.5 2.5 0 0 1 5 6.5h2.7zM12 9a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm0 2a2 2 0 1 1 0 4 2 2 0 0 1 0-4z',
+  warn: 'M12 3.2c.5 0 1 .3 1.2.7l8.4 15c.5.9-.2 2.1-1.2 2.1H3.6c-1 0-1.7-1.2-1.2-2.1l8.4-15c.2-.4.7-.7 1.2-.7zM11 9.5v5h2v-5zm0 6.5v2h2v-2z',
+  cone: 'M10.2 3h3.6l1.3 4.5H8.9zM8.5 9h7l1.1 4H7.4zM7 14.5h10l1.2 4.5H5.8zM3 20h18v1.5H3z',
+  closed: 'M12 2.5a9.5 9.5 0 1 1 0 19 9.5 9.5 0 0 1 0-19zM6.5 10.4v3.2h11v-3.2z',
+  car: 'M5.6 6.3A2.5 2.5 0 0 1 8 4.5h8a2.5 2.5 0 0 1 2.4 1.8L19.8 11H20a2 2 0 0 1 2 2v4.5a1 1 0 0 1-1 1h-1V20a1 1 0 0 1-1 1h-1.5a1 1 0 0 1-1-1v-1.5h-9V20a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1.5H3a1 1 0 0 1-1-1V13a2 2 0 0 1 2-2h.2zM7.6 7 6.5 11h11l-1.1-4a.8.8 0 0 0-.8-.5H8.4a.8.8 0 0 0-.8.5z'
+};
+const INC_GLYPH = { 1: 'warn', 6: 'car', 7: 'cone', 8: 'closed', 9: 'cone', 14: 'car' };
+const incGlyph = i => INC_GLYPH[i.cat] || 'warn';
+const incColor = i => (i.cat === 8 || i.cat === 1 || i.mag >= 3 ? '#FF453A' : '#FF9F0A');
+
+function glyphImage(glyph, color, ring) {
+  const c = document.createElement('canvas');
+  c.width = c.height = 72;
+  const x = c.getContext('2d');
+  x.shadowColor = 'rgba(0,0,0,.4)'; x.shadowBlur = 6; x.shadowOffsetY = 2;
+  x.beginPath(); x.arc(36, 35, 26, 0, Math.PI * 2); x.fillStyle = '#16171A'; x.fill();
+  x.shadowColor = 'transparent';
+  x.lineWidth = 3; x.strokeStyle = ring; x.stroke();
+  x.save(); x.translate(36 - 15, 35 - 15); x.scale(30 / 24, 30 / 24);
+  x.fillStyle = color; x.fill(new Path2D(GLYPH[glyph]), 'evenodd');
+  x.restore();
+  return x.getImageData(0, 0, 72, 72);
+}
+function ensureImage(id, glyph, color, ring) {
+  if (!S.map.hasImage(id)) S.map.addImage(id, glyphImage(glyph, color, ring), { pixelRatio: 2 });
+  return id;
+}
 
 async function initMap() {
   let style;
@@ -220,14 +249,14 @@ async function initMap() {
   catch { toast('Harita yüklenemedi. İnternet bağlantını kontrol et.', 5000); return; }
   const map = S.map = new maplibregl.Map({
     container: 'map', style, center: [IZMIR.lon, IZMIR.lat], zoom: 12, attributionControl: false,
-    maxPitch: 70, fadeDuration: 200, dragRotate: true, pitchWithRotate: true
+    maxPitch: 75, fadeDuration: 250, dragRotate: true, pitchWithRotate: true, antialias: true
   });
   map.on('load', () => {
     addLayers();
     S.mapReady = true;
     applyTheme();
     $('map').classList.add('ready');
-    if (S.pos) { S.firstFix = false; map.jumpTo({ center: [S.pos.lon, S.pos.lat], zoom: 15.5, pitch: store.prefs.tilt ? 50 : 0 }); updatePuck(S.pos); }
+    if (S.pos) { S.firstFix = false; map.jumpTo({ center: [S.pos.lon, S.pos.lat], zoom: store.prefs.tilt ? 16.4 : 15.5, pitch: store.prefs.tilt ? 58 : 0 }); updatePuck(S.pos); }
     loadIncidents();
     drawRadars();
   });
@@ -235,8 +264,11 @@ async function initMap() {
   map.on('dragstart', () => {
     if (S.nav) { S.follow = false; $('nav-recenter').hidden = false; $('nav-street').hidden = true; }
   });
+  // Navigasyonda konum oku kamerayla birlikte akıcı kaysın (GPS adımları arasında zıplamasın)
+  map.on('move', () => { if (S.nav && S.follow && S.puck) S.puck.setLngLat(map.getCenter()); });
   map.on('rotate', () => updateLocateBtn());
-  map.on('moveend', () => { clearTimeout(S.incT); S.incT = setTimeout(loadIncidents, 1200); });
+  map.on('pitchend', () => updateTiltBtn());
+  map.on('moveend', () => { clearTimeout(S.incT); S.incT = setTimeout(() => { loadIncidents(); if (!S.nav) drawRadars(); }, 900); });
 
   // Basılı tut => o noktayı seç
   let lp = null, lpPt = null;
@@ -257,29 +289,28 @@ function headImage() {
   c.width = c.height = 64;
   const x = c.getContext('2d');
   x.beginPath(); x.moveTo(32, 6); x.lineTo(56, 52); x.lineTo(8, 52); x.closePath();
-  x.lineJoin = 'round'; x.lineWidth = 7; x.strokeStyle = '#1c1c1e'; x.stroke();
+  x.lineJoin = 'round'; x.lineWidth = 7; x.strokeStyle = '#16171A'; x.stroke();
   x.fillStyle = '#ffffff'; x.fill();
   return x.getImageData(0, 0, 64, 64);
 }
 
-function badgeImage(emoji, ring, fill = '#fff') {
-  const c = document.createElement('canvas');
-  c.width = c.height = 96;
-  const x = c.getContext('2d');
-  x.shadowColor = 'rgba(0,0,0,.35)'; x.shadowBlur = 8; x.shadowOffsetY = 3;
-  x.beginPath(); x.arc(48, 46, 38, 0, Math.PI * 2); x.fillStyle = fill; x.fill();
-  x.shadowColor = 'transparent';
-  x.lineWidth = 7; x.strokeStyle = ring; x.stroke();
-  x.font = '40px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
-  x.textAlign = 'center'; x.textBaseline = 'middle';
-  x.fillText(emoji, 48, 49);
-  return x.getImageData(0, 0, 96, 96);
-}
-const ringColor = i => (i.cat === 8 ? '#8E0000' : i.mag >= 3 ? '#D70015' : i.mag === 2 ? '#FF3B30' : '#FF9500');
-function ensureIncImage(i) {
-  const id = `inc-${i.cat}-${i.mag}`;
-  if (!S.map.hasImage(id)) S.map.addImage(id, badgeImage(i.emoji, ringColor(i)), { pixelRatio: 2 });
-  return id;
+function addClusterLayers(m, src, ring, minzoom) {
+  m.addLayer({
+    id: `${src}-cl`, type: 'circle', source: src, minzoom, filter: ['has', 'point_count'],
+    paint: { 'circle-color': '#16171A', 'circle-radius': ['step', ['get', 'point_count'], 13, 5, 16, 20, 20], 'circle-stroke-width': 2, 'circle-stroke-color': ring, 'circle-opacity': 0.95 }
+  });
+  m.addLayer({
+    id: `${src}-cn`, type: 'symbol', source: src, minzoom, filter: ['has', 'point_count'],
+    layout: { 'text-field': ['get', 'point_count_abbreviated'], 'text-font': ['Noto Sans Bold'], 'text-size': 12, 'text-allow-overlap': true },
+    paint: { 'text-color': '#F2F2F3' }
+  });
+  m.on('click', `${src}-cl`, async e => {
+    const f = e.features[0];
+    try {
+      const z = await m.getSource(src).getClusterExpansionZoom(f.properties.cluster_id);
+      m.easeTo({ center: f.geometry.coordinates, zoom: z + 0.3, duration: 500 });
+    } catch { }
+  });
 }
 
 function addLayers() {
@@ -289,32 +320,33 @@ function addLayers() {
   m.addSource('yolcu-routes', { type: 'geojson', data: EMPTY });
   m.addSource('yolcu-jams', { type: 'geojson', data: EMPTY });
   m.addSource('yolcu-arrow', { type: 'geojson', data: EMPTY });
-  m.addSource('yolcu-inc', { type: 'geojson', data: EMPTY });
-  m.addSource('yolcu-cams', { type: 'geojson', data: EMPTY });
-  m.addLayer({ id: 'yolcu-alt-case', type: 'line', source: 'yolcu-routes', filter: ['!', ['get', 'sel']], layout: round, paint: { 'line-color': '#5E92D2', 'line-width': w(6, 22) } }, before);
-  m.addLayer({ id: 'yolcu-alt', type: 'line', source: 'yolcu-routes', filter: ['!', ['get', 'sel']], layout: round, paint: { 'line-color': '#8DBDF7', 'line-width': w(4, 16) } }, before);
-  m.addLayer({ id: 'yolcu-route-case', type: 'line', source: 'yolcu-routes', filter: ['get', 'sel'], layout: round, paint: { 'line-color': '#0057D2', 'line-width': w(8, 26) } }, before);
-  m.addLayer({ id: 'yolcu-route', type: 'line', source: 'yolcu-routes', filter: ['get', 'sel'], layout: round, paint: { 'line-color': '#0A84FF', 'line-width': w(5.5, 19) } }, before);
+  m.addSource('yolcu-inc', { type: 'geojson', data: EMPTY, cluster: true, clusterRadius: 44, clusterMaxZoom: 13 });
+  m.addSource('yolcu-cams', { type: 'geojson', data: EMPTY, cluster: true, clusterRadius: 44, clusterMaxZoom: 13 });
+  m.addLayer({ id: 'yolcu-alt-case', type: 'line', source: 'yolcu-routes', filter: ['!', ['get', 'sel']], layout: round, paint: { 'line-color': '#6F8C88', 'line-width': w(6, 22) } }, before);
+  m.addLayer({ id: 'yolcu-alt', type: 'line', source: 'yolcu-routes', filter: ['!', ['get', 'sel']], layout: round, paint: { 'line-color': '#9FB9B5', 'line-width': w(4, 16) } }, before);
+  m.addLayer({ id: 'yolcu-route-case', type: 'line', source: 'yolcu-routes', filter: ['get', 'sel'], layout: round, paint: { 'line-color': '#0B6B62', 'line-width': w(8, 26) } }, before);
+  m.addLayer({ id: 'yolcu-route', type: 'line', source: 'yolcu-routes', filter: ['get', 'sel'], layout: round, paint: { 'line-color': ACCENT, 'line-width': w(5.5, 19) } }, before);
   m.addLayer({
     id: 'yolcu-jams', type: 'line', source: 'yolcu-jams', layout: round,
-    paint: { 'line-width': w(5, 17), 'line-color': ['match', ['get', 'mag'], 3, '#B3261E', 4, '#5A0B0B', 2, '#FF3B30', '#FF9F0A'] }
+    paint: { 'line-width': w(5, 17), 'line-color': ['match', ['get', 'mag'], 3, '#D93A2F', 4, '#8E1A12', 2, '#E85A2C', '#F09A2A'] }
   }, before);
-  m.addLayer({ id: 'yolcu-arrow-case', type: 'line', source: 'yolcu-arrow', minzoom: 13, filter: ['==', ['geometry-type'], 'LineString'], layout: round, paint: { 'line-color': '#1c1c1e', 'line-width': w(5, 24) } });
+  m.addLayer({ id: 'yolcu-arrow-case', type: 'line', source: 'yolcu-arrow', minzoom: 13, filter: ['==', ['geometry-type'], 'LineString'], layout: round, paint: { 'line-color': '#16171A', 'line-width': w(5, 24) } });
   m.addLayer({ id: 'yolcu-arrow', type: 'line', source: 'yolcu-arrow', minzoom: 13, filter: ['==', ['geometry-type'], 'LineString'], layout: round, paint: { 'line-color': '#fff', 'line-width': w(3, 16) } });
   m.addImage('yolcu-head', headImage(), { pixelRatio: 2 });
   m.addLayer({
     id: 'yolcu-arrow-head', type: 'symbol', source: 'yolcu-arrow', minzoom: 13, filter: ['==', ['geometry-type'], 'Point'],
     layout: { 'icon-image': 'yolcu-head', 'icon-rotate': ['get', 'b'], 'icon-rotation-alignment': 'map', 'icon-pitch-alignment': 'map', 'icon-allow-overlap': true, 'icon-ignore-placement': true, 'icon-size': ['interpolate', ['exponential', 1.5], ['zoom'], 13, 0.35, 18, 1.5] }
   });
-  m.addImage('cam-osm', badgeImage('📷', '#0A84FF'), { pixelRatio: 2 });
-  m.addImage('cam-user', badgeImage('📷', '#AF52DE'), { pixelRatio: 2 });
+  ensureImage('cam', 'camera', '#E6E6E8', 'rgba(255,255,255,.35)');
+  addClusterLayers(m, 'yolcu-cams', 'rgba(255,255,255,.35)', 12.5);
   m.addLayer({
-    id: 'yolcu-cams', type: 'symbol', source: 'yolcu-cams', minzoom: 13.5,
-    layout: { 'icon-image': ['get', 'img'], 'icon-allow-overlap': true, 'icon-size': ['interpolate', ['linear'], ['zoom'], 13.5, 0.5, 17, 0.85] }
+    id: 'yolcu-cams', type: 'symbol', source: 'yolcu-cams', minzoom: 12.5, filter: ['!', ['has', 'point_count']],
+    layout: { 'icon-image': 'cam', 'icon-allow-overlap': true, 'icon-size': ['interpolate', ['linear'], ['zoom'], 11, 0.75, 16, 1] }
   });
+  addClusterLayers(m, 'yolcu-inc', 'rgba(255,159,10,.7)', 11.5);
   m.addLayer({
-    id: 'yolcu-inc', type: 'symbol', source: 'yolcu-inc', minzoom: 9,
-    layout: { 'icon-image': ['get', 'img'], 'icon-allow-overlap': true, 'icon-size': ['interpolate', ['linear'], ['zoom'], 9, 0.6, 15, 1] }
+    id: 'yolcu-inc', type: 'symbol', source: 'yolcu-inc', minzoom: 11.5, filter: ['!', ['has', 'point_count']],
+    layout: { 'icon-image': ['get', 'img'], 'icon-allow-overlap': true, 'icon-size': ['interpolate', ['linear'], ['zoom'], 10, 0.8, 16, 1.05] }
   });
   m.on('click', 'yolcu-alt', e => {
     const i = e.features[0]?.properties?.i;
@@ -328,7 +360,7 @@ function addLayers() {
   m.on('click', 'yolcu-cams', e => {
     if (S.nav) return;
     const p = e.features[0]?.properties;
-    toast(p?.max ? `Radar · hız sınırı ${p.max} km/sa` : 'Radar');
+    toast([p?.desc ? `Radar · ${p.desc}` : 'Radar', p?.max ? `sınır ${p.max} km/sa` : ''].filter(Boolean).join(' · '), 3500);
   });
 }
 
@@ -348,8 +380,8 @@ function setDest(p) {
 }
 
 function camPadding() {
-  if (wide()) return { top: 60, bottom: 60, left: 450, right: 80 };
-  return { top: safeT() + 70, bottom: Math.min(sheet.visible(), window.innerHeight * 0.6) + 20, left: 40, right: 76 };
+  if (wide()) return { top: 60, bottom: 60, left: 440, right: 80 };
+  return { top: safeT() + 64, bottom: Math.min(sheet.visible(), window.innerHeight * 0.6) + 20, left: 36, right: 72 };
 }
 
 function fitCoords(coords, opts = {}) {
@@ -358,10 +390,10 @@ function fitCoords(coords, opts = {}) {
   for (const c of coords) b.extend(c);
   // MapLibre önceki kamera payını yenisine ekliyor; sıfırlamazsak rota sığmıyor
   S.map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 });
-  S.map.fitBounds(b, { padding: opts.padding || camPadding(), duration: 800, maxZoom: 16, bearing: 0, pitch: 0 });
+  S.map.fitBounds(b, { padding: opts.padding || camPadding(), duration: 900, maxZoom: 16, bearing: 0, pitch: 0 });
 }
 
-/* ---------- Trafik katmanı ve olaylar ---------- */
+/* ---------- Trafik katmanı (TomTom vektör) ---------- */
 const FLOW_LAYERS = ['yolcu-flow-slow', 'yolcu-flow-jam', 'yolcu-flow-closed'];
 function setFlow() {
   const m = S.map;
@@ -374,17 +406,14 @@ function setFlow() {
   const closed = ['==', ['get', 'road_closure'], true];
   // Sadece ana yollar (ara sokaklardaki küçük yavaşlamalar haritayı kalabalıklaştırıyor)
   const major = ['match', ['get', 'road_type'], ['Motorway', 'International road', 'Major road', 'Secondary road', 'Connecting road', 'Major local road'], true, false];
-  const width = ['interpolate', ['linear'], ['zoom'], 10, 1.6, 14, 3.2, 18, 7];
+  const width = ['interpolate', ['linear'], ['zoom'], 10, 1.4, 14, 2.8, 18, 6];
   const base = { type: 'line', source: 'tt-flow', 'source-layer': 'Traffic flow', minzoom: 9, layout: { 'line-cap': 'round', 'line-join': 'round' } };
-  // Yavaş: turuncu kesikli
   m.addLayer({ ...base, id: 'yolcu-flow-slow', filter: ['all', major, ['!', closed], ['>=', lvl, 0.35], ['<', lvl, 0.62]],
-    paint: { 'line-color': '#FF9500', 'line-width': width, 'line-dasharray': [1.6, 1.1], 'line-opacity': 0.95 } }, 'yolcu-alt-case');
-  // Sıkışık: kırmızı
+    paint: { 'line-color': '#F09A2A', 'line-width': width, 'line-dasharray': [1.6, 1.1], 'line-opacity': 0.9 } }, 'yolcu-alt-case');
   m.addLayer({ ...base, id: 'yolcu-flow-jam', filter: ['all', major, ['!', closed], ['<', lvl, 0.35]],
-    paint: { 'line-color': '#E5241B', 'line-width': width, 'line-opacity': 0.95 } }, 'yolcu-alt-case');
-  // Kapalı: koyu kırmızı kesikli
+    paint: { 'line-color': '#D93A2F', 'line-width': width, 'line-opacity': 0.9 } }, 'yolcu-alt-case');
   m.addLayer({ ...base, id: 'yolcu-flow-closed', filter: closed,
-    paint: { 'line-color': '#8E0000', 'line-width': width, 'line-dasharray': [0.8, 1.2] } }, 'yolcu-alt-case');
+    paint: { 'line-color': '#8E1A12', 'line-width': width, 'line-dasharray': [0.8, 1.2] } }, 'yolcu-alt-case');
 }
 
 function drawIncidents() {
@@ -392,7 +421,10 @@ function drawIncidents() {
   const list = (S.nav ? S.navInc : (store.prefs.traffic ? S.incidents : [])).filter(i => i.cat !== 6 || (S.nav && i.delay >= 60));
   S.map.getSource('yolcu-inc')?.setData({
     type: 'FeatureCollection',
-    features: list.map(i => ({ type: 'Feature', properties: { id: i.id, img: ensureIncImage(i) }, geometry: { type: 'Point', coordinates: i.point } }))
+    features: list.map(i => {
+      const g = incGlyph(i), col = incColor(i);
+      return { type: 'Feature', properties: { id: i.id, img: ensureImage(`inc-${g}-${col}`, g, col, col) }, geometry: { type: 'Point', coordinates: i.point } };
+    })
   });
 }
 
@@ -421,21 +453,35 @@ function showIncident(inc) {
   S.map?.easeTo({ center: inc.point, zoom: Math.max(S.map.getZoom(), 15), padding: camPadding(), duration: 600 });
 }
 
-/* ---------- Radarlar ---------- */
-const allCams = () => [...S.cams, ...store.radars.map((r, i) => ({ id: `user${i}`, lat: r.lat, lon: r.lon, max: r.max || null, dir: null, src: 'user' }))];
+/* ---------- Radarlar (otomatik: EGM resmi listesi + OpenStreetMap) ---------- */
+const userCams = () => store.radars.map((r, i) => ({ id: `user${i}`, lat: r.lat, lon: r.lon, max: r.max || null, dir: null, src: 'user' }));
+const allCams = () => radar.merge(S.cams, S.official, userCams());
+function routeCams(route) {
+  const bb = traffic.bboxOf(route.coords, 0.01);
+  return radar.onRoute(radar.merge(radar.inBox(S.cams, bb), radar.inBox(S.official, bb), userCams()), route);
+}
 
 function drawRadars() {
   if (!S.mapReady) return;
-  const list = store.prefs.radar ? (S.nav ? S.navCams : allCams()) : [];
+  let list = [];
+  if (store.prefs.radar) {
+    if (S.nav) list = S.navCams;
+    else {
+      const b = S.map.getBounds();
+      const pw = (b.getEast() - b.getWest()) * 0.5, ph = (b.getNorth() - b.getSouth()) * 0.5;
+      list = radar.inBox(allCams(), [b.getWest() - pw, b.getSouth() - ph, b.getEast() + pw, b.getNorth() + ph]);
+    }
+  }
   S.map.getSource('yolcu-cams')?.setData({
     type: 'FeatureCollection',
-    features: list.map(c => ({ type: 'Feature', properties: { img: c.src === 'user' ? 'cam-user' : 'cam-osm', max: c.max || 0 }, geometry: { type: 'Point', coordinates: [c.lon, c.lat] } }))
+    features: list.map(c => ({ type: 'Feature', properties: { max: c.max || 0, desc: c.desc || '' }, geometry: { type: 'Point', coordinates: [c.lon, c.lat] } }))
   });
 }
 
 async function loadRadars(p) {
   if (!store.prefs.radar || S.radarLoading) return;
   S.radarLoading = true;
+  radar.official().then(list => { S.official = list; drawRadars(); });
   try { S.cams = await radar.around(p.lat, p.lon); drawRadars(); }
   catch { S.cams = radar.cached(); drawRadars(); }
   finally { S.radarLoading = false; }
@@ -445,24 +491,21 @@ async function loadRadars(p) {
 async function updateWeather(p) {
   if (S.weatherAt && Date.now() - S.weatherAt < 30 * 60e3) return;
   S.weatherAt = Date.now();
-  try {
-    S.weather = await api.weather(p.lat, p.lon);
-    renderWherePill();
-  } catch { S.weatherAt = null; }
+  try { S.weather = await api.weather(p.lat, p.lon); renderWherePill(); }
+  catch { S.weatherAt = null; }
 }
 
-/* ---------- Yol adı rozetleri (rota üzerinde) ---------- */
+/* ---------- Yol adı rozetleri ---------- */
 function clearChips() { S.chips.forEach(m => m.remove()); S.chips = []; }
 function drawChips(route) {
   clearChips();
   if (!route?.story || !S.map) return;
-  const roads = route.story.filter(s => s.kind === 'road').sort((a, b) => b.m - a.m).slice(0, 4);
+  const roads = route.story.filter(s => s.kind === 'road').sort((a, b) => b.m - a.m).slice(0, 3);
   for (const s of roads) {
     const mid = (route.cum[Math.min(s.b, route.cum.length - 1)] + route.cum[Math.min(s.e, route.cum.length - 1)]) / 2;
     const p = pointAt(route.coords, route.cum, mid);
     const el = document.createElement('div');
-    const cls = s.cls === 'motorway' ? 'hw' : (s.cls === 'trunk' || s.cls === 'primary') ? 'main' : '';
-    el.className = `road-chip ${cls}`;
+    el.className = `road-chip ${s.cls === 'motorway' || s.cls === 'trunk' || s.cls === 'primary' ? 'main' : ''}`;
     el.textContent = api.abbr(s.name);
     S.chips.push(new maplibregl.Marker({ element: el }).setLngLat([p.lon, p.lat]).addTo(S.map));
   }
@@ -498,7 +541,7 @@ function onPos(p) {
   S.pos = p;
   updatePuck(p);
   if (first) { updateLocateBtn(); loadRadars(p); updateWeather(p); }
-  if (S.firstFix && S.mapReady && !S.nav) { S.firstFix = false; S.map.jumpTo({ center: [p.lon, p.lat], zoom: 15.5, pitch: store.prefs.tilt ? 50 : 0 }); }
+  if (S.firstFix && S.mapReady && !S.nav) { S.firstFix = false; S.map.jumpTo({ center: [p.lon, p.lat], zoom: store.prefs.tilt ? 16.4 : 15.5, pitch: store.prefs.tilt ? 58 : 0 }); }
   if (S.nav) navTick(p);
   else {
     updateWhere(p);
@@ -515,9 +558,7 @@ function startGeo() {
       const c = g.coords;
       onPos({ lat: c.latitude, lon: c.longitude, acc: c.accuracy, speed: c.speed, heading: c.heading, alt: c.altitude, t: g.timestamp || Date.now() });
     },
-    err => {
-      if (err.code === 1) toast('Konum izni verilmedi. Ayarlar › Gizlilik › Konum Servisleri’nden izin ver.', 6000);
-    },
+    err => { if (err.code === 1) toast('Konum izni verilmedi. Ayarlar › Gizlilik › Konum Servisleri’nden izin ver.', 6000); },
     { enableHighAccuracy: true, maximumAge: 1000, timeout: 30000 }
   );
 }
@@ -526,9 +567,7 @@ function waitPos(ms = 8000) {
   if (S.pos) return Promise.resolve(S.pos);
   return new Promise(res => {
     const t0 = Date.now();
-    const iv = setInterval(() => {
-      if (S.pos || Date.now() - t0 > ms) { clearInterval(iv); res(S.pos); }
-    }, 250);
+    const iv = setInterval(() => { if (S.pos || Date.now() - t0 > ms) { clearInterval(iv); res(S.pos); } }, 250);
   });
 }
 
@@ -548,26 +587,25 @@ function renderWherePill() {
   const r = S.where;
   $('where-pill').hidden = !r || !!S.nav;
   if (!r) return;
-  $('where-road').textContent = r.road || r.hood || 'Buradasın';
-  $('where-area').textContent = [r.road ? r.hood : null, r.district].filter(Boolean).join(', ');
-  const w = $('weather');
-  if (S.weather) { w.hidden = false; w.innerHTML = `<i>${S.weather.icon}</i>${S.weather.temp}°`; } else w.hidden = true;
+  $('where-road').textContent = r.hood || r.road || r.district || 'Buradasın';
+  $('weather').textContent = S.weather ? `${S.weather.icon} ${S.weather.temp}°` : '';
 }
 
 function updateLocateBtn() {
   const rotated = S.map && Math.abs(S.map.getBearing()) > 2;
   $('btn-locate').innerHTML = rotated ? I.compass : (S.pos ? I.loc : I.locLine);
 }
+function updateTiltBtn() {
+  const on = S.map && S.map.getPitch() > 15;
+  $('btn-3d').classList.toggle('on', !!on);
+}
 
 /* ================= Görünümler ================= */
-function placeIcon(kind, extra = '') {
+function placeIcon(kind) {
   const [ic, col] = KIND_ICON[kind] || KIND_ICON.pin;
-  return `<span class="row-icon ${col} ${extra}">${I[ic]}</span>`;
+  return `<span class="row-icon ${col}">${I[ic]}</span>`;
 }
-function distFromMe(p) {
-  if (!S.pos) return '';
-  return G.fmtDist(dist(S.pos.lon, S.pos.lat, p.lon, p.lat));
-}
+function distFromMe(p) { return S.pos ? G.fmtDist(dist(S.pos.lon, S.pos.lat, p.lon, p.lat)) : ''; }
 function placeRow(p, act, i, kind) {
   return `<button class="row" data-act="${act}" data-i="${i}">${placeIcon(kind || p.kind)}<span class="row-main"><span class="row-title">${esc(p.name)}</span>${p.sub ? `<span class="row-sub">${esc(p.sub)}</span>` : ''}</span><span class="row-meta">${distFromMe(p)}</span></button>`;
 }
@@ -575,22 +613,20 @@ function placeRow(p, act, i, kind) {
 function prefsList(travel = 'auto') {
   const P = store.prefs;
   const row = (k, title, sub) => `<label class="row"><span class="row-main"><span class="row-title">${title}</span><span class="row-sub wrap">${sub}</span></span><input type="checkbox" class="switch" data-pref="${k}" ${P[k] ? 'checked' : ''}></label>`;
-  if (travel !== 'auto') {
-    return `<div class="list plain">${row('hills', 'Yokuşlardan kaçın', 'Dik yokuş ve merdivenleri önermez')}</div>`;
-  }
+  if (travel !== 'auto') return `<div class="list plain">${row('hills', 'Yokuşlardan kaçın', 'Dik yokuş ve merdivenleri önermez')}</div>`;
   return `<div class="list plain">
-    ${row('highways', 'Ana yolları tercih et', 'Otoyol, çevre yolu ve bulvarlardan götürür')}
+    ${row('highways', 'Ana yolları tercih et', 'Otoyol, çevre yolu ve bulvarlar')}
     ${row('hills', 'Yokuşlardan kaçın', 'Dik yokuşlu yolları önermez')}
-    ${row('rough', 'Bozuk yollardan kaçın', 'Bozuk ve kötü yüzeyli yolları önermez')}
-    ${row('tolls', 'Ücretli yollardan kaçın', 'Otoyol ve köprü ücretlerinden kaçınır')}
+    ${row('rough', 'Bozuk yollardan kaçın', 'Kötü yüzeyli yolları önermez')}
+    ${row('tolls', 'Ücretli yollardan kaçın', 'Otoyol ve köprü ücretleri')}
   </div>`;
 }
 
 function viewHome() {
-  const fav = (k, label, icon, col) => {
+  const fav = (k, label, icon) => {
     const p = store[k];
     const sub = p ? (distFromMe(p) || 'Git') : 'Ekle';
-    return `<button class="fav" data-act="fav" data-k="${k}"><span class="fav-icon ${col}">${I[icon]}</span><span class="fav-title">${label}</span><span class="fav-sub">${sub}</span></button>`;
+    return `<button class="fav" data-act="fav" data-k="${k}"><span class="fav-icon k-${k}">${I[icon]}</span><span class="fav-title">${label}</span><span class="fav-sub">${sub}</span></button>`;
   };
   const places = store.places.map((p, i) => {
     const [ic, col] = KIND_ICON[p.kind] || KIND_ICON.star;
@@ -598,38 +634,35 @@ function viewHome() {
   }).join('');
   const an = store.activeNav;
   const resume = an && !S.nav && Date.now() - an.t < 4 * 3600e3
-    ? `<button class="resume" data-act="resumeNav">${I.car}<span style="flex:1"><b>Yola devam et</b><small>${esc(an.dest.name)}</small></span><span class="close" data-act="dismissResume" style="background:rgba(255,255,255,.25);color:#fff">${I.x}</span></button>` : '';
+    ? `<button class="resume" data-act="resumeNav">${I.car}<span style="flex:1"><b>Yola devam et</b><small>${esc(an.dest.name)}</small></span><span class="close" data-act="dismissResume">${I.x}</span></button>` : '';
   const recents = store.recents.length
     ? `<div class="list">${store.recents.slice(0, 6).map((p, i) => placeRow(p, 'recent', i, 'recent')).join('')}</div>`
     : `<div class="list"><div class="empty">Gittiğin yerler burada görünecek.</div></div>`;
-  const ttHint = !key() ? `<button class="tip" data-act="openSettings"><span class="row-icon c-orange">${I.warn}</span><span class="t"><b>Trafik ve kaza bilgisi kapalı</b><small>Açmak için dokun · 2 dakikalık kurulum</small></span>${I.chevron}</button>` : '';
+  const ttHint = !key() ? `<button class="tip" data-act="openSettings"><span class="row-icon c-orange">${I.warn}</span><span class="t"><b>Trafik bilgisi kapalı</b><small>Açmak için dokun</small></span>${I.chevron}</button>` : '';
   return `
     <div class="search-row">
-      <button class="searchbar" data-act="openSearch">${I.search}<span>Yolcu’da Ara</span></button>
-      <button class="avatar" data-act="openSettings" aria-label="Ayarlar">${I.gear}</button>
+      <button class="searchbar" data-act="openSearch">${I.search}<span>Nereye?</span></button>
+      <button class="icon-btn" data-act="openSettings" aria-label="Ayarlar">${I.gear}</button>
     </div>
     ${resume}
-    <div class="section" data-peek>
-      <div class="section-head"><h3>Favoriler</h3></div>
-      <div class="favs">
-        ${fav('work', 'İş', 'work', 'c-brown')}
-        ${fav('home', 'Ev', 'home', 'c-teal')}
-        ${places}
-        <button class="fav" data-act="addPlace"><span class="fav-icon add">${I.plus}</span><span class="fav-title">Ekle</span><span class="fav-sub">&nbsp;</span></button>
-      </div>
+    <div class="favs" data-peek>
+      ${fav('work', 'İş', 'work')}
+      ${fav('home', 'Ev', 'home')}
+      ${places}
+      <button class="fav" data-act="addPlace"><span class="fav-icon add">${I.plus}</span><span class="fav-title">Ekle</span><span class="fav-sub">&nbsp;</span></button>
     </div>
     ${ttHint}
     <div class="section">
-      <div class="section-head"><h3>Son Kullanılanlar</h3>${store.recents.length ? '<button class="link small" data-act="clearRecents">Temizle</button>' : ''}</div>
+      <div class="section-head"><h3>Son kullanılanlar</h3>${store.recents.length ? '<button class="link small" data-act="clearRecents">Temizle</button>' : ''}</div>
       ${recents}
     </div>
-    <p class="legal">Harita © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> katkıcıları · OpenFreeMap · Mapterhorn · Uydu © Esri · Rota: Valhalla · Hava: Open‑Meteo${key() ? ' · Trafik © TomTom' : ''}</p>`;
+    <p class="legal">Harita © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> katkıcıları · OpenFreeMap · Mapterhorn · Uydu © Esri · Rota: Valhalla · Hava: Open‑Meteo · Radar: EGM, OSM${key() ? ' · Trafik © TomTom' : ''}</p>`;
 }
 
 function viewSearch() {
-  const label = { home: 'Ev adresini ara', work: 'İş yerini ara', place: 'Kaydedilecek yeri ara' }[S.pickFor] || 'Yer, işletme veya adres ara';
+  const label = { home: 'Ev adresini ara', work: 'İş yerini ara', place: 'Kaydedilecek yeri ara' }[S.pickFor] || 'Yer, işletme veya adres';
   const hint = S.pickFor === 'home' ? '<p class="hint">Sokak adını ve mahalleyi yazman yeterli. Örn: “2996 Sokak Gülyaka”. Adresin sadece bu telefonda saklanır.</p>'
-    : S.pickFor === 'work' ? '<p class="hint">İş yerinin adını veya adresini yaz. Bulamazsan Vazgeç’e bas, haritada iş yerinin üstüne basılı tut ve “İş Yap”ı seç.</p>'
+    : S.pickFor === 'work' ? '<p class="hint">İş yerinin adını veya adresini yaz. Bulamazsan haritada iş yerinin üstüne basılı tut ve “İş Yap”ı seç.</p>'
       : S.pickFor === 'place' ? '<p class="hint">Sık gittiğin bir yeri ara ve seç, favorilere eklensin.</p>' : '';
   return `
     <div class="search-row" data-peek>
@@ -641,7 +674,7 @@ function viewSearch() {
 }
 
 function resultsHtml(list) {
-  const noKeyTip = !key() ? '<p class="hint" style="margin-top:12px">Aradığın işletme çıkmadı mı? Haritada yerin üstüne basılı tut, oradan seçebilirsin. Ayarlar’dan TomTom’u bağlarsan dükkan ve ofisleri de bulur.</p>' : '';
+  const noKeyTip = !key() ? '<p class="hint" style="margin-top:12px">Aradığın işletme çıkmadı mı? Haritada yerin üstüne basılı tut, oradan seçebilirsin.</p>' : '';
   if (list === 'loading') return '<div class="list"><div class="empty">Aranıyor…</div></div>';
   if (list === 'error') return '<div class="list"><div class="empty">Arama yapılamadı. İnternet bağlantını kontrol et.</div></div>';
   if (Array.isArray(list)) {
@@ -676,7 +709,6 @@ function viewPlace() {
     </div>
     ${p.isPoint ? `<div class="section"><div class="list plain">
       <button class="row danger" data-act="avoidHere"><span class="row-icon c-red">${I.noentry}</span><span class="row-main"><span class="row-title">Bu yoldan beni geçirme</span><span class="row-sub wrap">Rotalar artık bu noktadaki yolu kullanmaz</span></span></button>
-      <button class="row" data-act="radarHere"><span class="row-icon c-purple">${I.camera}</span><span class="row-main"><span class="row-title">Burada radar var</span><span class="row-sub wrap">Buradan geçerken seni uyarır</span></span></button>
     </div></div>` : ''}`;
 }
 
@@ -686,36 +718,66 @@ function viewIncident() {
   const d = Math.round(i.delay / 60);
   return `
     <div class="card-head">
-      <div><p class="eyebrow" style="color:${ringColor(i)}">${esc(i.label)}</p><h2>${esc(i.desc)}</h2>
+      <div><p class="eyebrow" style="color:${incColor(i)}">${esc(i.label)}</p><h2>${esc(i.desc)}</h2>
       <p class="sub">${esc([i.road, i.from && i.to ? `${i.from} → ${i.to}` : i.from].filter(Boolean).join(' · '))}</p></div>
       <button class="close" data-act="goHome" aria-label="Kapat">${I.x}</button>
     </div>
     <div class="stats-grid" data-peek>
       <div class="stat-card"><small>Gecikme</small><b>${d >= 1 ? d : '—'}<span>${d >= 1 ? 'dk' : ''}</span></b></div>
-      <div class="stat-card"><small>Başlangıç</small><b style="font-size:21px">${since ? G.fmtClock(since) : '—'}</b></div>
+      <div class="stat-card"><small>Başlangıç</small><b>${since ? G.fmtClock(since) : '—'}</b></div>
     </div>
     <p class="legal" style="text-align:left;margin-top:6px">Kaynak: TomTom canlı trafik</p>`;
 }
 
-function fmtBig(sec) {
+const rtime = r => r.trafficTime || r.time;
+function fmtTime(sec) {
   const min = Math.max(1, Math.round(sec / 60));
   if (min < 60) return `${min}<small> dk</small>`;
   return `${Math.floor(min / 60)}<small> sa </small>${min % 60}<small> dk</small>`;
 }
-const rtime = r => r.trafficTime || r.time;
+
+// Kartta sadece en önemli 1-2 not; geri kalan her şey "Detaylar"da
+function routeNotes(r) {
+  const n = [];
+  if (r.best) n.push(['Önerilen', 'best']);
+  const a = r.stats;
+  const d = Math.round((r.trafficDelay || 0) / 60);
+  if (r.trafficDelay != null && d >= 2) n.push([`Trafik +${d} dk`, d >= 6 ? 'bad' : 'warn']);
+  else if (a && a.steep >= 300) n.push(['Yokuşlu', 'warn']);
+  else if (a && a.rough >= 400) n.push(['Bozuk yol', 'warn']);
+  else if (r.mode === 'auto' && a && a.total && (a.motorway + a.main) / a.total > 0.6 && !r.best) n.push(['Ana yollardan', '']);
+  return n.slice(0, 2);
+}
+function metricsHtml(r) {
+  const a = r.stats || {};
+  const m = (label, val, cls = 'good') => `<div class="metric"><small>${label}</small><b class="${cls}">${val}</b></div>`;
+  const dist = v => G.fmtDist(v);
+  const cells = [];
+  if (r.mode === 'auto') {
+    const d = r.trafficDelay;
+    cells.push(m('Trafik', d == null ? '—' : d >= 120 ? `+${Math.round(d / 60)} dk` : 'Akıcı', d >= 360 ? 'bad' : d >= 120 ? 'warn' : 'good'));
+  }
+  cells.push(m('Yokuş', !a.total ? '—' : a.steep < 150 ? 'Yok' : dist(a.steep), a.steep >= 600 ? 'bad' : a.steep >= 150 ? 'warn' : 'good'));
+  cells.push(m('Bozuk yol', !a.total ? '—' : a.rough < 80 ? 'Yok' : dist(a.rough), a.rough >= 400 ? 'warn' : 'good'));
+  if (r.mode === 'auto') {
+    cells.push(m('Ara sokak', !a.total ? '—' : dist(a.small), a.small > 1500 ? 'warn' : 'good'));
+    cells.push(m('Ana yol', !a.total ? '—' : `%${Math.round(((a.motorway + a.main) / a.total) * 100)}`));
+  } else cells.push(m('Merdiven', a.steps ? 'Var' : 'Yok', a.steps ? 'warn' : 'good'));
+  cells.push(m('Dönüş', r.turns ?? '—'));
+  return `<div class="metrics">${cells.join('')}</div>`;
+}
 
 function storyHtml(r) {
   const st = r.story;
   if (!st || !st.length) return '';
   const items = st.map((s, i) => {
     if (s.kind === 'local') return `<div class="tl-item local"><span class="tl-dot"></span><div><small>Ara sokaklar · ${G.fmtDist(s.m)}</small></div></div>`;
-    const cls = s.cls === 'motorway' ? 'hw' : (s.cls === 'trunk' || s.cls === 'primary') ? 'main' : '';
     const tw = s.toward?.length ? ` · ${esc(s.toward.join(', '))} yönü` : '';
-    return `<button class="tl-item road ${cls}" data-act="focusSeg" data-i="${i}"><span class="tl-dot"></span><div><b>${esc(s.name)}${s.ref ? ` <span class="ref">${esc(s.ref)}</span>` : ''}</b><small>${G.fmtDist(s.m)}${tw}</small></div></button>`;
+    return `<button class="tl-item road" data-act="focusSeg" data-i="${i}"><span class="tl-dot"></span><div><b>${esc(s.name)}${s.ref ? `<span class="ref">${esc(s.ref)}</span>` : ''}</b><small>${G.fmtDist(s.m)}${tw}</small></div></button>`;
   }).join('');
   return `
     <div class="section">
-      <div class="section-head"><h3>Hangi yoldan?</h3><button class="link small icon-link" data-act="speakStory">${I.speaker}<span>Sesli anlat</span></button></div>
+      <div class="section-head"><h3>Hangi yoldan</h3><button class="link small icon-link" data-act="speakStory">${I.speaker}<span>Dinle</span></button></div>
       <div class="list plain timeline">
         <div class="tl-item start"><span class="tl-dot"></span><div><b>Konumun</b></div></div>
         ${items}
@@ -734,23 +796,22 @@ function viewRoutes() {
   else {
     const best = S.routes[0];
     cards = S.routes.map((r, i) => {
+      const sel = i === S.sel;
       const eta = G.fmtClock(new Date(Date.now() + rtime(r) * 1000));
       const diff = i > 0 ? Math.round((rtime(r) - rtime(best)) / 60) : 0;
-      const diffTxt = i > 0 && diff !== 0 ? ` · ${diff > 0 ? '+' : ''}${diff} dk` : '';
-      const badges = (r.best ? '<span class="badge best">Önerilen</span>' : '') + (r.fastest ? '<span class="badge fast">En hızlı</span>' : '');
-      const via = r.story ? r.story.filter(s => s.kind === 'road').map(s => api.abbr(s.name)).filter((v, k, a) => a.indexOf(v) === k).slice(0, 4).join(' › ') : r.via;
-      return `<div class="route-card ${i === S.sel ? 'sel' : ''}" data-act="selRoute" data-i="${i}" ${i === 0 ? 'data-peek' : ''}>
-        <div class="rc-main">
-          ${badges ? `<div class="rc-badges">${badges}</div>` : ''}
-          <div class="rc-time">${fmtBig(rtime(r))}</div>
-          <div class="rc-sub">${eta} varış · ${G.fmtDist(r.lengthM)}${diffTxt}</div>
-          ${via ? `<div class="rc-via">${esc(via)}</div>` : ''}
-          <div class="tags">${r.tags.map(t => `<span class="tag ${t.c}">${esc(t.t)}</span>`).join('')}</div>
+      const via = r.story ? r.story.filter(s => s.kind === 'road').map(s => api.abbr(s.name)).filter((v, k, a) => a.indexOf(v) === k).slice(0, 3).join(' › ') : r.via;
+      const notes = routeNotes(r).map(([t, c]) => `<span class="note ${c}">${esc(t)}</span>`).join('');
+      return `<div class="route ${sel ? 'sel' : ''}" ${i === 0 ? 'data-peek' : ''}>
+        <div class="route-top" data-act="selRoute" data-i="${i}">
+          <div class="route-main">
+            <div class="rt-time">${fmtTime(rtime(r))}${diff ? `<span class="rt-diff">${diff > 0 ? '+' : ''}${diff} dk</span>` : ''}</div>
+            <div class="rt-sub">${eta} varış · ${G.fmtDist(r.lengthM)}</div>
+            ${via ? `<div class="rt-via">${esc(via)}</div>` : ''}
+            ${notes ? `<div class="notes">${notes}</div>` : ''}
+          </div>
+          ${sel ? `<button class="go" data-act="go" data-i="${i}">GİT</button>` : ''}
         </div>
-        <div class="rc-side">
-          <button class="go" data-act="go" data-i="${i}">GİT</button>
-          <button class="link small" data-act="preview" data-i="${i}">Önizle</button>
-        </div>
+        ${sel ? `<div class="route-more"><button class="link" data-act="routeDetails">${S.details ? 'Detayları gizle' : 'Detaylar'}</button><button class="link" data-act="preview" data-i="${i}">Önizle</button></div>${S.details ? metricsHtml(r) : ''}` : ''}
       </div>`;
     }).join('');
   }
@@ -765,22 +826,18 @@ function viewRoutes() {
       return `<div class="row"><span class="step-icon">${G.arrowSvg(m)}</span><span class="row-main"><span class="row-title">${esc(G.action(m))}</span>${sub ? `<span class="row-sub wrap">${esc(sub)}</span>` : ''}</span><span class="row-meta">${seg > 5 ? G.fmtDist(seg) : ''}</span></div>`;
     }).join('');
   }
-  const destKind = d.kind === 'work' ? ['work', 'c-brown'] : d.kind === 'home' ? ['home', 'c-teal'] : ['pin', 'c-red'];
   return `
     <div class="card-head center">
       <button class="circle-btn" data-act="shareEta" aria-label="Paylaş">${I.share}</button>
-      <div><h2>Yol Tarifi</h2></div>
+      <div><h2>Rotalar</h2></div>
       <button class="close" data-act="closeRoutes" aria-label="Kapat">${I.x}</button>
     </div>
     <div class="mode-seg">${modes}</div>
-    <div class="fromto">
-      <div class="ft-row"><span class="ft-dot c-blue">${I.loc}</span><span>Konumum</span></div>
-      <div class="ft-row"><span class="ft-dot ${destKind[1]}">${I[destKind[0]]}</span><span>${esc(d.name)}</span></div>
-    </div>
+    <div class="fromto"><span>Konumum</span>${I.arrowR}<b>${esc(d.name)}</b></div>
     ${cards}
     ${r ? storyHtml(r) : ''}
-    <div class="section"><div class="section-head"><h3>Rota Tercihleri</h3></div>${prefsList(S.travel)}</div>
-    ${steps ? `<div class="section"><div class="section-head"><h3>Adım Adım</h3></div><div class="list plain steps">${steps}</div></div>` : ''}`;
+    <div class="section"><div class="section-head"><h3>Rota tercihleri</h3></div>${prefsList(S.travel)}</div>
+    ${steps ? `<div class="section"><div class="section-head"><h3>Adım adım</h3></div><div class="list plain steps">${steps}</div></div>` : ''}`;
 }
 
 function viewWhere() {
@@ -796,14 +853,14 @@ function viewWhere() {
     </div>
     <div class="stats-grid" data-peek>
       <div class="stat-card"><small>Hız</small><b>${kmh}<span>km/sa</span></b></div>
-      <div class="stat-card"><small>Hava</small><b>${w ? `${w.icon} ${w.temp}°` : '—'}</b></div>
-      <div class="stat-card"><small>Yön</small><b style="font-size:21px">${p?.heading != null && p.speed > 0.8 ? compass(p.heading) : '—'}</b></div>
+      <div class="stat-card"><small>Hava</small><b>${w ? `${w.temp}°` : '—'}<span>${w ? w.icon : ''}</span></b></div>
+      <div class="stat-card"><small>Yön</small><b>${p?.heading != null && p.speed > 0.8 ? compass(p.heading) : '—'}</b></div>
       <div class="stat-card"><small>Rakım</small><b>${p?.alt != null ? Math.round(p.alt) : '—'}<span>${p?.alt != null ? 'm' : ''}</span></b></div>
     </div>
-    ${p ? `<div class="list plain"><button class="row" data-act="copyCoords"><span class="row-main"><span class="row-title">Koordinatlar</span><span class="row-sub">${p.lat.toFixed(5)}, ${p.lon.toFixed(5)} · ±${Math.round(p.acc || 0)} m</span></span><span class="row-meta" style="color:var(--blue)">Kopyala</span></button></div>` : ''}
+    ${p ? `<div class="list plain"><button class="row" data-act="copyCoords"><span class="row-main"><span class="row-title">Koordinatlar</span><span class="row-sub">${p.lat.toFixed(5)}, ${p.lon.toFixed(5)} · ±${Math.round(p.acc || 0)} m</span></span><span class="row-meta" style="color:var(--accent)">Kopyala</span></button></div>` : ''}
     <div class="action-grid" style="grid-template-columns:repeat(2,1fr)">
-      <button data-act="shareMe">${I.share}<span>Konumumu Paylaş</span></button>
-      <button data-act="saveMe">${I.star}<span>Burayı Kaydet</span></button>
+      <button data-act="shareMe">${I.share}<span>Konumumu paylaş</span></button>
+      <button data-act="saveMe">${I.star}<span>Burayı kaydet</span></button>
     </div>`;
 }
 
@@ -886,7 +943,7 @@ function showPlace(p) {
   sheet.set('half');
   setDest(p);
   setRoutesData([]); setJams([]); clearChips();
-  S.map?.easeTo({ center: [p.lon, p.lat], zoom: Math.max(S.map.getZoom(), 15.5), padding: camPadding(), duration: 700 });
+  S.map?.easeTo({ center: [p.lon, p.lat], zoom: Math.max(S.map.getZoom(), 15.5), padding: camPadding(), duration: 800 });
 }
 
 async function openPoint(ll) {
@@ -906,7 +963,7 @@ async function openPoint(ll) {
 function openRoutes(dest) {
   document.activeElement?.blur?.();
   S.dest = { name: dest.name, sub: dest.sub || '', lat: dest.lat, lon: dest.lon, kind: dest.kind || 'pin' };
-  S.view = 'routes';
+  S.view = 'routes'; S.details = false;
   setDest(S.dest);
   planRoutes();
   sheet.set('half');
@@ -957,7 +1014,8 @@ function drawRoutes() {
 }
 
 function selectRoute(i) {
-  S.sel = i;
+  if (S.sel === i) return;
+  S.sel = i; S.details = false;
   const sc = sheet.body.scrollTop;
   render();
   sheet.body.scrollTop = sc;
@@ -976,20 +1034,18 @@ function startNav(i, simulate = false) {
   S.nav = new Navigator(route);
   S.follow = true; S.arrowFor = -1; S.arrived = false; S.bannerFor = null;
   S.navInc = []; S.said = new Set(); S.trafRatio = route.trafficRatio || null;
-  S.navCams = route.mode === 'auto' ? radar.onRoute(allCams(), route) : [];
+  S.navCams = route.mode === 'auto' ? routeCams(route) : [];
   const eta = G.fmtClock(new Date(Date.now() + rtime(route) * 1000));
   S.navIntro = [G.storyShort(route.story), `Tahmini varış ${eta}.`].filter(Boolean).join(' ');
   document.body.classList.add('navigating');
-  for (const id of ['nav', 'nav-side', 'nav-speed', 'nav-bottom']) $(id).hidden = false;
+  for (const id of ['nav', 'nav-side', 'nav-bottom']) $(id).hidden = false;
   $('nav-recenter').hidden = true;
   $('nav-alert').hidden = true;
   $('speed-limit').hidden = true;
   closeNavMenu();
-  $('nav-speed').classList.toggle('walk', route.mode !== 'auto');
-  $('nav-radar').hidden = route.mode !== 'auto';
+  $('nav-bottom').classList.toggle('walk', route.mode !== 'auto');
   updateMuteBtn();
   $('nav-overview').innerHTML = I.route;
-  $('nav-radar').innerHTML = I.camera;
   S.puck?.getElement().classList.add('nav');
   clearChips();
   setRoutesData([line(route.coords, { i: 0, sel: true })]);
@@ -1038,15 +1094,16 @@ async function refreshNavTraffic() {
 
 function showSimStatus() {
   const s = $('nav-status');
-  s.hidden = false; s.className = 'nav-status sim';
+  s.hidden = false; s.className = 'nav-status';
   s.dataset.act = 'simSpeed';
-  s.textContent = `Önizleme · ${S.sim.factor}× hız (değiştirmek için dokun)`;
+  s.textContent = `Önizleme · ${S.sim.factor}× (dokun: hız)`;
 }
 
 function navPadding() {
   const H = window.innerHeight;
-  if (wide()) return { top: Math.round(H * 0.35), bottom: 60, left: 450, right: 40 };
-  return { top: Math.round(H * 0.44), bottom: 120 + safeB(), left: 0, right: 0 };
+  if (wide()) return { top: Math.round(H * 0.38), bottom: 60, left: 440, right: 40 };
+  // Araç ekranın alt üçte birinde: önündeki yol ve yaklaşan kavşaklar görünsün
+  return { top: Math.round(H * 0.5), bottom: 96 + safeB(), left: 0, right: 0 };
 }
 
 function maneuverArrow(m) {
@@ -1055,10 +1112,7 @@ function maneuverArrow(m) {
   const c = sliceAlong(r.coords, r.cum, Math.max(0, m.along - 40), Math.min(r.lengthM, m.along + 30));
   if (c.length < 2) { setArrowData([]); return; }
   const a = c[c.length - 2], b = c[c.length - 1];
-  setArrowData([
-    line(c, {}),
-    { type: 'Feature', properties: { b: bearing(a[0], a[1], b[0], b[1]) }, geometry: { type: 'Point', coordinates: b } }
-  ]);
+  setArrowData([line(c, {}), { type: 'Feature', properties: { b: bearing(a[0], a[1], b[0], b[1]) }, geometry: { type: 'Point', coordinates: b } }]);
 }
 
 function renderBanner(st) {
@@ -1083,10 +1137,10 @@ function renderBanner(st) {
   } else th.hidden = true;
 }
 
-function setDur(sec, valId, unitId) {
+function setDur(sec) {
   const min = Math.max(1, Math.round(sec / 60));
-  if (min < 60) { $(valId).textContent = min; $(unitId).textContent = 'dk'; }
-  else { $(valId).textContent = `${Math.floor(min / 60)}:${String(min % 60).padStart(2, '0')}`; $(unitId).textContent = 'sa'; }
+  if (min < 60) { $('nav-rem').textContent = min; $('nav-rem-u').textContent = 'dk'; }
+  else { $('nav-rem').textContent = `${Math.floor(min / 60)}:${String(min % 60).padStart(2, '0')}`; $('nav-rem-u').textContent = 'sa'; }
 }
 function setKm(m) {
   if (m >= 1000) { $('nav-km').textContent = m >= 10000 ? Math.round(m / 1000) : (m / 1000).toFixed(1).replace('.', ','); $('nav-km-u').textContent = 'km'; }
@@ -1101,7 +1155,7 @@ function navTick(p) {
   const onRoute = st.snapped.d < 30;
   const pp = onRoute ? st.snapped : p;
   const hd = p.speed > (walk ? 0.8 : 2) && p.heading != null ? p.heading : st.routeBearing;
-  if (S.puck) { S.puck.setLngLat([pp.lon, pp.lat]); S.puck.setRotation(hd); }
+  if (S.puck) { if (!S.follow) S.puck.setLngLat([pp.lon, pp.lat]); S.puck.setRotation(hd); }
 
   setRoutesData([line(sliceAlong(r.coords, r.cum, st.along, st.total), { i: 0, sel: true })]);
   if (st.upIdx !== S.arrowFor) { S.arrowFor = st.upIdx; maneuverArrow(st.up); }
@@ -1110,12 +1164,11 @@ function navTick(p) {
   S.lastRemS = st.remS;
   const remS = st.remS * (S.trafRatio && !walk ? Math.min(2.5, Math.max(0.5, S.trafRatio)) : 1);
   $('nav-eta').textContent = G.fmtClock(new Date(Date.now() + remS * 1000));
-  setDur(remS, 'nav-rem', 'nav-rem-u');
+  setDur(remS);
   setKm(st.remM);
   const kmh = Math.round((p.speed || 0) * 3.6);
   $('speed-val').textContent = kmh;
 
-  // Radar
   let say = st.say;
   if (say && S.navIntro) { say = `${S.navIntro} ${say}`; S.navIntro = null; }
   const cam = store.prefs.radar ? S.navCams.find(c => c.along > st.along - 15 && c.along - st.along < 1000) : null;
@@ -1125,20 +1178,20 @@ function navTick(p) {
   lim.hidden = !limit || walk;
   if (limit) lim.textContent = limit;
   const over = !walk && !!limit && kmh > limit + 4;
-  $('nav-speed').classList.toggle('over', over);
+  $('nav-bottom').classList.toggle('over', over);
 
   const street = $('nav-street');
-  street.hidden = !st.street || !S.follow;
+  street.hidden = !st.street || !S.follow || !$('nav-menu').hidden;
   street.textContent = st.street;
 
-  // Uyarı balonu: önce radar (yakınsa), sonra kaza/yol çalışması
+  // Uyarı: sadece gerektiğinde (önce yakındaki radar, sonra yoldaki olay)
   const al = $('nav-alert');
-  const inc = S.navInc.find(i => i.along > st.along - 30 && i.along - st.along < 5000);
+  const inc = S.navInc.find(i => i.along > st.along - 30 && i.along - st.along < 4000);
   if (cam) {
     const dd = Math.max(0, cam.along - st.along);
     al.hidden = false;
-    al.className = `nav-alert radar${over ? ' over' : ''}`;
-    al.innerHTML = `<span class="na-emoji">📷</span><span><b>Radar</b> · ${G.fmtDist(dd)}${cam.max ? ` · Sınır ${cam.max}` : ''}</span>`;
+    al.className = `nav-alert${over ? ' over' : ''}`;
+    al.innerHTML = `<span class="na-ic">${I.camera}</span><span><b>Radar</b> · ${G.fmtDist(dd)}${cam.max ? ` · sınır ${cam.max}` : ''}</span>`;
     if (dd < 550 && !S.said.has('cam' + cam.id)) {
       S.said.add('cam' + cam.id);
       if (store.prefs.radarSound) radar.beep(over ? 3 : 2);
@@ -1148,9 +1201,10 @@ function navTick(p) {
   } else if (inc) {
     const dd = Math.max(0, inc.along - st.along);
     const dm = Math.round(inc.delay / 60);
+    const icon = { warn: I.warn, car: I.car, cone: I.cone, closed: I.noentry }[incGlyph(inc)] || I.warn;
     al.hidden = false;
     al.className = `nav-alert m${Math.min(inc.mag, 3)}`;
-    al.innerHTML = `<span class="na-emoji">${inc.emoji}</span><span><b>${esc(inc.label)}</b> · ${G.fmtDist(dd)}${dm >= 1 ? ` · +${dm} dk` : ''}</span>`;
+    al.innerHTML = `<span class="na-ic">${icon}</span><span><b>${esc(inc.label)}</b> · ${G.fmtDist(dd)}${dm >= 1 ? ` · +${dm} dk` : ''}</span>`;
     if (dd < 1500 && !S.said.has('inc' + inc.id)) {
       S.said.add('inc' + inc.id);
       if (store.prefs.radarSound) radar.beep(1);
@@ -1163,17 +1217,17 @@ function navTick(p) {
   if (st.arrived) { arrive(); return; }
   if (st.reroute) doReroute(p);
   else if (!S.sim && !S.rerouting) $('nav-status').hidden = !st.offRoute;
-  if (st.offRoute && !S.sim && !S.rerouting) { const s = $('nav-status'); s.className = 'nav-status'; s.textContent = 'Rotanın dışındasın'; delete s.dataset.act; }
+  if (st.offRoute && !S.sim && !S.rerouting) { const s = $('nav-status'); s.className = 'nav-status off'; s.textContent = 'Rotanın dışındasın'; delete s.dataset.act; }
 
-  // Yan düğmeler üst kartın hemen altında dursun (kart büyüyüp küçülünce çakışmasın)
   const nb = Math.round($('nav').getBoundingClientRect().bottom + 12);
   if (nb !== S.sideTop) { S.sideTop = nb; $('nav-side').style.top = nb + 'px'; }
 
   if (S.follow && S.map) {
+    // Arkadan takip eden 3B kamera; hız arttıkça biraz uzaklaşır, dönüşe yaklaşınca yakınlaşır
     let z;
     if (walk) z = 18;
-    else z = st.distToNext < 220 ? 17.3 : p.speed > 22 ? 15.6 : p.speed > 13 ? 16.2 : 16.8;
-    S.map.easeTo({ center: [pp.lon, pp.lat], bearing: hd, pitch: walk ? 45 : 60, zoom: z, duration: S.sim ? 480 : 950, easing: t => t, padding: navPadding() });
+    else z = st.distToNext < 220 ? 17.4 : p.speed > 22 ? 15.8 : p.speed > 13 ? 16.4 : 17;
+    S.map.easeTo({ center: [pp.lon, pp.lat], bearing: hd, pitch: walk ? 50 : 64, zoom: z, duration: S.sim ? 480 : 1000, easing: t => t, padding: navPadding() });
   }
 }
 
@@ -1189,7 +1243,7 @@ async function doReroute(p) {
     S.nav.setRoute(r);
     S.nav.started = true;
     S.arrowFor = -1; S.bannerFor = null;
-    S.navCams = r.mode === 'auto' ? radar.onRoute(allCams(), r) : [];
+    S.navCams = r.mode === 'auto' ? routeCams(r) : [];
     drawRadars();
     setJams([]);
     if (key() && r.mode === 'auto') { refreshNavIncidents(); refreshNavTraffic(); }
@@ -1222,7 +1276,7 @@ function endNav() {
   S.timers.forEach(clearInterval); S.timers = [];
   document.body.classList.remove('navigating');
   closeNavMenu();
-  for (const id of ['nav', 'nav-side', 'nav-speed', 'nav-bottom', 'nav-recenter', 'nav-street']) $(id).hidden = true;
+  for (const id of ['nav', 'nav-side', 'nav-bottom', 'nav-recenter', 'nav-street']) $(id).hidden = true;
   S.puck?.getElement().classList.remove('nav');
   keepAwake(false);
   voice.stop();
@@ -1233,7 +1287,7 @@ function endNav() {
   if (S.map) {
     S.map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 });
     const c = S.pos ? [S.pos.lon, S.pos.lat] : S.map.getCenter();
-    S.map.easeTo({ center: c, pitch: store.prefs.tilt ? 50 : 0, bearing: 0, zoom: 15.5, duration: 800 });
+    S.map.easeTo({ center: c, pitch: store.prefs.tilt ? 58 : 0, bearing: 0, zoom: store.prefs.tilt ? 16.4 : 15.5, duration: 900 });
   }
   if (S.pos) updatePuck(S.pos);
   renderWherePill();
@@ -1253,11 +1307,10 @@ function renderNavMenu() {
   const P = store.prefs;
   $('nav-menu').innerHTML = `
     <div class="list">
-      <button class="row" data-act="overview"><span class="row-icon c-blue">${I.route}</span><span class="row-main"><span class="row-title">Tüm rotayı gör</span></span></button>
-      <label class="row"><span class="row-icon c-gray">${I.speaker}</span><span class="row-main"><span class="row-title">Sesli yönlendirme</span></span><input type="checkbox" class="switch" data-pref="voice" ${P.voice ? 'checked' : ''}></label>
-      <label class="row"><span class="row-icon c-purple">${I.camera}</span><span class="row-main"><span class="row-title">Radar uyarı sesi</span></span><input type="checkbox" class="switch" data-pref="radarSound" ${P.radarSound ? 'checked' : ''}></label>
-      ${S.navRoute?.mode === 'auto' ? `<button class="row" data-act="reportRadar"><span class="row-icon c-purple">${I.plus}</span><span class="row-main"><span class="row-title">Burada radar var</span></span></button>` : ''}
-      <button class="row" data-act="shareEta"><span class="row-icon c-green">${I.share}</span><span class="row-main"><span class="row-title">Varış saatini paylaş</span></span></button>
+      <button class="row" data-act="overview"><span class="row-icon">${I.route}</span><span class="row-main"><span class="row-title">Tüm rotayı gör</span></span></button>
+      <label class="row"><span class="row-icon">${I.speaker}</span><span class="row-main"><span class="row-title">Sesli yönlendirme</span></span><input type="checkbox" class="switch" data-pref="voice" ${P.voice ? 'checked' : ''}></label>
+      <label class="row"><span class="row-icon">${I.camera}</span><span class="row-main"><span class="row-title">Radar uyarı sesi</span></span><input type="checkbox" class="switch" data-pref="radarSound" ${P.radarSound ? 'checked' : ''}></label>
+      <button class="row" data-act="shareEta"><span class="row-icon">${I.share}</span><span class="row-main"><span class="row-title">Varış saatini paylaş</span></span></button>
     </div>
     <button class="end-route" data-act="endNav">Rotayı Bitir</button>`;
 }
@@ -1273,9 +1326,8 @@ function renderLayers() {
       <button class="mt ${P.mapType === 'satellite' ? 'on' : ''}" data-act="mapType" data-v="satellite"><span class="mt-img sat"></span><span>Uydu</span></button>
     </div>
     <div class="list plain">
-      <label class="row"><span class="row-main"><span class="row-title">3B görünüm</span><span class="row-sub">Binalar ve eğik bakış</span></span><input type="checkbox" class="switch" data-pref="tilt" ${P.tilt ? 'checked' : ''}></label>
-      <label class="row"><span class="row-main"><span class="row-title">Radarlar</span><span class="row-sub">Hız kameralarını göster ve uyar</span></span><input type="checkbox" class="switch" data-pref="radar" ${P.radar ? 'checked' : ''}></label>
-      <label class="row"><span class="row-main"><span class="row-title">Trafik</span><span class="row-sub">${key() ? 'Yoğunluk, kaza ve yol çalışması' : 'Önce Ayarlar’dan TomTom’u bağla'}</span></span><input type="checkbox" class="switch" data-pref="traffic" ${P.traffic && key() ? 'checked' : ''} ${key() ? '' : 'disabled'}></label>
+      <label class="row"><span class="row-main"><span class="row-title">Trafik</span><span class="row-sub">${key() ? 'Yavaş ve sıkışık yollar, kazalar' : 'Önce Ayarlar’dan TomTom’u bağla'}</span></span><input type="checkbox" class="switch" data-pref="traffic" ${P.traffic && key() ? 'checked' : ''} ${key() ? '' : 'disabled'}></label>
+      <label class="row"><span class="row-main"><span class="row-title">Radarlar</span><span class="row-sub">EDS ve hız kameraları</span></span><input type="checkbox" class="switch" data-pref="radar" ${P.radar ? 'checked' : ''}></label>
     </div>`;
 }
 
@@ -1285,71 +1337,69 @@ function renderSettings() {
   const seg = (v, l) => `<button class="${P.theme === v ? 'on' : ''}" data-act="theme" data-v="${v}">${l}</button>`;
   const favRow = (k, label, icon) => {
     const p = store[k];
-    return `<button class="row" data-act="setFav" data-k="${k}">${placeIcon(icon)}<span class="row-main"><span class="row-title">${label}</span><span class="row-sub">${p ? esc(p.name + (p.sub ? ', ' + p.sub : '')) : 'Ayarlanmadı'}</span></span><span class="row-meta" style="color:var(--blue)">${p ? 'Değiştir' : 'Ekle'}</span></button>`;
+    return `<button class="row" data-act="setFav" data-k="${k}">${placeIcon(icon)}<span class="row-main"><span class="row-title">${label}</span><span class="row-sub">${p ? esc(p.name + (p.sub ? ', ' + p.sub : '')) : 'Ayarlanmadı'}</span></span><span class="row-meta" style="color:var(--accent)">${p ? 'Değiştir' : 'Ekle'}</span></button>`;
   };
   const places = store.places.length ? store.places.map((p, i) => `<div class="row">${placeIcon(p.kind || 'star')}<span class="row-main"><span class="row-title">${esc(p.name)}</span><span class="row-sub">${esc(p.sub)}</span></span><button class="close" data-act="delPlace" data-i="${i}" aria-label="Sil">${I.trash}</button></div>`).join('')
     : '<div class="empty">Henüz kayıtlı yer yok.</div>';
   const avoids = store.avoids.length ? store.avoids.map((a, i) => `<div class="row"><span class="row-icon c-red">${I.noentry}</span><span class="row-main"><span class="row-title">${esc(a.name || 'Yol')}</span><span class="row-sub">${esc(a.sub || '')}</span></span><button class="close" data-act="delAvoid" data-i="${i}" aria-label="Sil">${I.trash}</button></div>`).join('')
     : '<div class="empty">Henüz kaçındığın yol yok.</div>';
-  const myRadars = store.radars.length ? store.radars.map((r, i) => `<div class="row"><span class="row-icon c-purple">${I.camera}</span><span class="row-main"><span class="row-title">${esc(r.name || 'Radar')}</span><span class="row-sub">${new Date(r.t).toLocaleDateString('tr-TR')} tarihinde işaretlendi</span></span><button class="close" data-act="delRadar" data-i="${i}" aria-label="Sil">${I.trash}</button></div>`).join('')
-    : '<div class="empty">Henüz işaretlediğin radar yok.</div>';
+  const oldRadars = store.radars.length ? `<div class="group-title">Elle işaretlenmiş radarlar</div><div class="list plain">${store.radars.map((r, i) => `<div class="row"><span class="row-icon">${I.camera}</span><span class="row-main"><span class="row-title">${esc(r.name || 'Radar')}</span></span><button class="close" data-act="delRadar" data-i="${i}" aria-label="Sil">${I.trash}</button></div>`).join('')}</div>` : '';
   const icons = Object.entries(ICONS).map(([id, name]) => `<button class="icon-opt ${P.icon === id ? 'on' : ''}" data-act="pickIcon" data-v="${id}"><img src="icons/${id}-180.png" alt=""><span>${name}</span></button>`).join('');
 
   $('settings-body').innerHTML = `
-    <div class="group-title">Görünüm</div>
-    <div class="segmented">${seg('auto', 'Otomatik')}${seg('light', 'Açık')}${seg('dark', 'Koyu')}</div>
+    <div class="group-title">Harita teması</div>
+    <div class="segmented">${seg('auto', 'Otomatik')}${seg('light', 'Gündüz')}${seg('dark', 'Gece')}</div>
 
     <div class="group-title">Radar</div>
     <div class="list plain">
-      <label class="row"><span class="row-main"><span class="row-title">Radar uyarıları</span><span class="row-sub">${S.cams.length ? `Çevrende ${S.cams.length} radar biliniyor` : 'Radar verisi yükleniyor'}</span></span><input type="checkbox" class="switch" data-pref="radar" ${P.radar ? 'checked' : ''}></label>
-      <label class="row"><span class="row-main"><span class="row-title">Uyarı sesi</span><span class="row-sub">Sesli yönlendirme kapalıyken de kısa bir “bip” çalar</span></span><input type="checkbox" class="switch" data-pref="radarSound" ${P.radarSound ? 'checked' : ''}></label>
+      <label class="row"><span class="row-main"><span class="row-title">Radar uyarıları</span><span class="row-sub">${S.official.length ? `${S.official.length} resmi EDS noktası + çevrende ${S.cams.length} radar` : 'Radar verisi yükleniyor'}</span></span><input type="checkbox" class="switch" data-pref="radar" ${P.radar ? 'checked' : ''}></label>
+      <label class="row"><span class="row-main"><span class="row-title">Uyarı sesi</span><span class="row-sub">Sesli yönlendirme kapalıyken de kısa bir “bip”</span></span><input type="checkbox" class="switch" data-pref="radarSound" ${P.radarSound ? 'checked' : ''}></label>
     </div>
-    <div class="group-title">İşaretlediğin Radarlar</div>
-    <div class="list plain">${myRadars}</div>
-    <p class="group-foot">Radar konumları OpenStreetMap’ten gelir ve her yerde eksiksiz olmayabilir. Bilmediği bir radar görürsen navigasyonda kamera düğmesine bas ya da haritada o noktaya basılı tutup “Burada radar var”ı seç.</p>
+    <p class="group-foot">Radarlar otomatik gelir, senin bir şey eklemen gerekmez: Emniyet Genel Müdürlüğü’nün resmi EDS listesi (her hafta güncellenir) ve OpenStreetMap’teki hız kameraları. Gezici radarların yeri hiçbir yerde yayınlanmadığı için gösterilemez.</p>
+    ${oldRadars}
 
-    <div class="group-title">Sesli Yönlendirme</div>
+    <div class="group-title">Sesli yönlendirme</div>
     <div class="list plain">
       <label class="row"><span class="row-main"><span class="row-title">Sesli yönlendirme</span><span class="row-sub">${voice.v ? esc(voice.v.name) : 'Telefonun sesi'}</span></span><input type="checkbox" class="switch" data-pref="voice" ${P.voice ? 'checked' : ''}></label>
     </div>
 
-    <div class="group-title">Trafik ve İşletme Arama</div>
+    <div class="group-title">Trafik ve işletme arama</div>
     <div class="list plain">
-      <div class="row" style="flex-wrap:wrap;gap:8px">
-        <span class="row-main"><span class="row-title">TomTom</span><span class="row-sub">${key() ? '<span style="color:var(--green)">● Bağlı</span> · Trafik, kazalar, işletme arama açık' : 'Bağlı değil'}</span></span>
+      <div class="row" style="gap:8px">
+        <span class="row-main"><span class="row-title">TomTom</span><span class="row-sub">${key() ? 'Bağlı · trafik, kazalar ve işletme arama açık' : 'Bağlı değil'}</span></span>
         ${key() ? `<button class="pill-btn" data-act="removeKey">Kaldır</button>` : ''}
       </div>
-      ${key() ? '' : `<div class="row" style="gap:8px"><input id="tt-key" class="text-input" placeholder="API anahtarını yapıştır" autocomplete="off" autocapitalize="off" spellcheck="false"><button class="pill-btn blue" data-act="saveKey">Kaydet</button></div>`}
+      ${key() ? '' : `<div class="row" style="gap:8px"><input id="tt-key" class="text-input" placeholder="API anahtarını yapıştır" autocomplete="off" autocapitalize="off" spellcheck="false"><button class="pill-btn accent" data-act="saveKey">Kaydet</button></div>`}
     </div>
-    ${key() ? '' : `<p class="group-foot"><b>Nasıl alınır (ücretsiz, kredi kartı yok):</b><br>1. <a href="https://developer.tomtom.com/user/register" target="_blank" rel="noopener">developer.tomtom.com</a>’da hesap aç.<br>2. Giriş yap, “Dashboard › Keys” bölümündeki anahtarı kopyala.<br>3. Buraya yapıştırıp Kaydet’e bas.</p>`}
+    ${key() ? '' : `<p class="group-foot">Ücretsiz anahtar: <a href="https://developer.tomtom.com/user/register" target="_blank" rel="noopener">developer.tomtom.com</a> › hesap aç › Dashboard › Keys.</p>`}
 
-    <div class="group-title">Uygulama Simgesi</div>
+    <div class="group-title">Uygulama simgesi</div>
     <div class="icon-grid">${icons}</div>
-    <div class="list plain" style="margin-top:12px"><button class="row blue" data-act="applyIcon"><span class="row-icon c-blue">${I.copy}</span><span class="row-main"><span class="row-title">Simgeyi telefona uygula</span><span class="row-sub wrap">Bağlantıyı kopyalar ve adımları gösterir</span></span></button></div>
+    <div class="list plain" style="margin-top:12px"><button class="row accent" data-act="applyIcon"><span class="row-icon">${I.copy}</span><span class="row-main"><span class="row-title">Simgeyi telefona uygula</span><span class="row-sub wrap">Bağlantıyı kopyalar ve adımları gösterir</span></span></button></div>
     <div id="icon-steps"></div>
 
-    <div class="group-title">Rota Tercihleri</div>
+    <div class="group-title">Rota tercihleri</div>
     ${prefsList('auto')}
 
-    <div class="group-title">Ev ve İş</div>
+    <div class="group-title">Ev ve iş</div>
     <div class="list plain">${favRow('home', 'Ev', 'home')}${favRow('work', 'İş', 'work')}</div>
 
-    <div class="group-title">Kayıtlı Yerler</div>
+    <div class="group-title">Kayıtlı yerler</div>
     <div class="list plain">${places}</div>
 
-    <div class="group-title">Kaçındığın Yollar</div>
+    <div class="group-title">Kaçındığın yollar</div>
     <div class="list plain">${avoids}</div>
-    <p class="group-foot">Haritada bir yola basılı tut ve “Bu yoldan beni geçirme”ye dokun. Yolcu seni bir daha oradan geçirmez.</p>
+    <p class="group-foot">Haritada bir yola basılı tut ve “Bu yoldan beni geçirme”ye dokun.</p>
 
     <div class="group-title">Yedek</div>
     <div class="list plain">
-      <button class="row blue" data-act="backup"><span class="row-icon c-blue">${I.download}</span><span class="row-main"><span class="row-title">Yedeği indir</span></span></button>
-      <button class="row blue" data-act="restore"><span class="row-icon c-gray">${I.upload}</span><span class="row-main"><span class="row-title">Yedekten geri yükle</span></span></button>
+      <button class="row" data-act="backup"><span class="row-icon">${I.download}</span><span class="row-main"><span class="row-title">Yedeği indir</span></span></button>
+      <button class="row" data-act="restore"><span class="row-icon">${I.upload}</span><span class="row-main"><span class="row-title">Yedekten geri yükle</span></span></button>
     </div>
-    <p class="group-foot">Ev, iş, kayıtlı yerler ve tercihlerin sadece bu telefonda saklanır, hiçbir sunucuya gönderilmez.</p>
+    <p class="group-foot">Tüm kişisel bilgiler sadece bu telefonda saklanır.</p>
 
     <div class="group-title">Hakkında</div>
-    <div class="list plain"><div class="row"><span class="row-main"><span class="row-title">Yolcu</span><span class="row-sub wrap">Harita © OpenStreetMap katkıcıları, OpenFreeMap. Arazi © Mapterhorn. Uydu © Esri, Maxar. Rota: Valhalla (FOSSGIS). Arama: Photon, Nominatim${key() ? ', TomTom' : ''}. Hava: Open‑Meteo. Radar: OpenStreetMap.</span></span></div></div>`;
+    <div class="list plain"><div class="row"><span class="row-main"><span class="row-title">Yolcu</span><span class="row-sub wrap">Harita © OpenStreetMap katkıcıları, OpenFreeMap. Arazi © Mapterhorn. Uydu © Esri, Maxar. Rota: Valhalla (FOSSGIS). Arama: Photon, Nominatim${key() ? ', TomTom' : ''}. Hava: Open‑Meteo. Radar: EGM EDS Haritası, OpenStreetMap.</span></span></div></div>`;
 }
 
 function applyIconLink() {
@@ -1357,12 +1407,12 @@ function applyIconLink() {
   if (link) link.href = `icons/${store.prefs.icon || 'mavi'}-180.png`;
 }
 
-function addRadarAt(lat, lon, name) {
-  store.radars.push({ lat, lon, name: name || 'Radar', t: Date.now() });
-  save();
-  if (S.nav) S.navCams = radar.onRoute(allCams(), S.navRoute);
-  drawRadars();
-  toast('Radar işaretlendi, buradan geçerken uyaracağım');
+function setTilt(on) {
+  store.prefs.tilt = on; save();
+  if (!S.map) return;
+  setTerrain(S.map, on && !S.nav);
+  const z = S.map.getZoom();
+  S.map.easeTo({ pitch: on ? 58 : 0, zoom: on ? Math.max(z, 15.8) : z, bearing: on ? S.map.getBearing() : 0, duration: 900 });
 }
 
 /* ================= Eylemler ================= */
@@ -1392,12 +1442,11 @@ const ACT = {
     toast('Tamam, seni bir daha bu yoldan geçirmeyeceğim');
     goHome();
   },
-  radarHere: () => { const p = S.place; addRadarAt(p.lat, p.lon, p.road || p.name); goHome(); },
-  reportRadar: () => { if (!S.pos) return; addRadarAt(S.pos.lat, S.pos.lon, S.nav ? $('nav-street').textContent : (S.where?.road || 'Radar')); closeNavMenu(); },
   closeRoutes: () => { S.planAbort?.abort(); S.routes = []; setRoutesData([]); setJams([]); clearChips(); if (S.place) showPlace(S.place); else goHome(); },
   replan: () => planRoutes(),
   travel: el => { if (S.travel === el.dataset.v) return; S.travel = el.dataset.v; planRoutes(); },
-  selRoute: (el, e) => { if (e.target.closest('.go, [data-act=preview]')) return; selectRoute(+el.dataset.i); },
+  selRoute: (el, e) => { if (e.target.closest('.go')) return; selectRoute(+el.dataset.i); },
+  routeDetails: () => { S.details = !S.details; const sc = sheet.body.scrollTop; render(); sheet.body.scrollTop = sc; },
   focusSeg: el => {
     const r = S.routes[S.sel]; const s = r?.story?.[+el.dataset.i]; if (!s) return;
     const c = r.coords.slice(s.b, s.e + 1);
@@ -1430,7 +1479,7 @@ const ACT = {
     const r = S.navRoute, st = S.nav;
     const c = sliceAlong(r.coords, r.cum, st.along, r.lengthM);
     const top = $('nav').getBoundingClientRect().bottom + 20;
-    fitCoords(c, { padding: { top, bottom: 150 + safeB(), left: wide() ? 470 : 40, right: 80 } });
+    fitCoords(c, { padding: { top, bottom: 130 + safeB(), left: wide() ? 460 : 36, right: 72 } });
   },
   toggleVoice: () => {
     store.prefs.voice = !store.prefs.voice; save(); updateMuteBtn();
@@ -1440,8 +1489,10 @@ const ACT = {
   simSpeed: () => { if (!S.sim) return; const f = [1, 3, 8]; S.sim.factor = f[(f.indexOf(S.sim.factor) + 1) % f.length]; showSimStatus(); },
   locate: () => {
     if (!S.pos) { toast('Konumun bekleniyor…'); return; }
-    S.map.easeTo({ center: [S.pos.lon, S.pos.lat], zoom: Math.max(S.map.getZoom(), 16), bearing: 0, pitch: store.prefs.tilt ? 50 : 0, duration: 700, padding: { top: 0, bottom: wide() ? 0 : sheet.visible() * 0.5, left: wide() ? 430 : 0, right: 0 } });
+    const tilt = store.prefs.tilt;
+    S.map.easeTo({ center: [S.pos.lon, S.pos.lat], zoom: Math.max(S.map.getZoom(), tilt ? 16.4 : 16), bearing: 0, pitch: tilt ? 58 : 0, duration: 900, padding: { top: 0, bottom: wide() ? 0 : sheet.visible() * 0.5, left: wide() ? 420 : 0, right: 0 } });
   },
+  toggle3d: () => setTilt(!(S.map && S.map.getPitch() > 15)),
   openLayers: () => { renderLayers(); $('layers').hidden = false; },
   closeLayers: () => { $('layers').hidden = true; },
   mapType: el => { store.prefs.mapType = el.dataset.v; save(); applyTheme(); renderLayers(); },
@@ -1472,7 +1523,7 @@ const ACT = {
       if (!(await traffic.testKey(v))) throw new Error();
       store.tomtomKey = v; store.prefs.traffic = true; save();
       setFlow(); loadIncidents(true);
-      toast('TomTom bağlandı. Trafik ve işletme arama açık.');
+      toast('TomTom bağlandı');
     } catch { toast('Anahtar çalışmadı. Doğru kopyaladığından emin ol.'); }
     renderSettings();
   },
@@ -1486,9 +1537,9 @@ const ACT = {
       <ol>
         <li>Ana ekrandaki Yolcu’ya basılı tut › <b>Uygulamayı Sil</b>.</li>
         <li><b>Safari</b>’yi aç, adres çubuğuna basılı tut › <b>Yapıştır ve Git</b>.</li>
-        <li>Paylaş düğmesi › <b>Ana Ekrana Ekle</b>.</li>
+        <li>Paylaş › <b>Ana Ekrana Ekle</b>.</li>
       </ol>
-      <small>Ev, iş, favoriler ve ayarların bağlantının içinde, yeni uygulamaya otomatik taşınır.</small>
+      <small>Ev, iş, favoriler ve ayarların bağlantının içinde, yeni uygulamaya taşınır.</small>
     </div>`;
   },
   setFav: el => { $('settings').hidden = true; S.pickFor = el.dataset.k; openSearch(); },
@@ -1529,7 +1580,6 @@ document.addEventListener('change', e => {
   save();
   if (k === 'voice') { updateMuteBtn(); if (!store.prefs.voice) voice.stop(); }
   else if (k === 'radarSound') { if (store.prefs.radarSound) { radar.unlockBeep(); radar.beep(1); } }
-  else if (k === 'tilt') { if (!S.nav) S.map?.easeTo({ pitch: store.prefs.tilt ? 50 : 0, duration: 600 }); }
   else if (k === 'traffic') { setFlow(); if (store.prefs.traffic) loadIncidents(true); else { S.incidents = []; drawIncidents(); } }
   else if (k === 'radar') { if (store.prefs.radar && S.pos) loadRadars(S.pos); drawRadars(); }
   else if (S.view === 'routes' && S.dest && !S.nav) planRoutes();
@@ -1565,7 +1615,8 @@ function boot() {
   applyIconLink();
   applyTheme();
   $('btn-locate').innerHTML = I.locLine;
-  $('btn-layers').innerHTML = I.map;
+  $('btn-layers').innerHTML = I.layers;
+  $('btn-3d').classList.toggle('on', !!store.prefs.tilt);
   sheet.init();
   render();
   requestAnimationFrame(() => sheet.set('peek', false));

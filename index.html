@@ -19,16 +19,18 @@
 <div id="app">
   <div id="map"></div>
 
-  <!-- Üst sol: neredeyim + hava -->
-  <button id="where-pill" class="glass where-pill" data-act="openWhere" hidden>
-    <span class="where-text"><b id="where-road">Konum alınıyor…</b><small id="where-area"></small></span>
-    <span id="weather" class="weather" hidden></span>
+  <!-- Üst: konum + hava (tek satır) -->
+  <button id="where-pill" class="where surface" data-act="openWhere" hidden>
+    <span id="where-road">Konum alınıyor…</span>
+    <span id="weather" class="wx"></span>
   </button>
 
-  <!-- Sağ üst kapsül -->
-  <div id="controls" class="glass controls">
+  <!-- Sağ üst kontroller -->
+  <div id="controls" class="controls surface">
     <button id="btn-layers" data-act="openLayers" aria-label="Harita görünümü"></button>
-    <span class="ctl-sep"></span>
+    <div class="ctl-sep"></div>
+    <button id="btn-3d" class="t3d" data-act="toggle3d" aria-label="3B görünüm">3B</button>
+    <div class="ctl-sep"></div>
     <button id="btn-locate" data-act="locate" aria-label="Konumuma git"></button>
   </div>
 
@@ -58,22 +60,17 @@
   </div>
 
   <div id="nav-side" class="nav-side" hidden>
-    <button id="nav-overview" class="glass round" data-act="overview" aria-label="Genel bakış"></button>
-    <button id="nav-mute" class="glass round" data-act="toggleVoice" aria-label="Ses"></button>
-    <button id="nav-radar" class="glass round" data-act="reportRadar" aria-label="Radar bildir"></button>
+    <button id="nav-overview" class="round" data-act="overview" aria-label="Tüm rota"></button>
+    <button id="nav-mute" class="round" data-act="toggleVoice" aria-label="Ses"></button>
   </div>
 
-  <div id="nav-speed" class="speed glass" hidden>
-    <div id="speed-limit" class="limit" hidden></div>
-    <div class="speed-now"><b id="speed-val">0</b><small>km/sa</small></div>
-  </div>
-
-  <button id="nav-recenter" class="glass recenter" data-act="recenter" hidden>Ortala</button>
+  <button id="nav-recenter" class="recenter" data-act="recenter" hidden>Ortala</button>
   <div id="nav-street" class="street-pill" hidden></div>
 
   <div id="nav-bottom" class="nav-bottom" hidden>
     <div class="grabber"></div>
     <button class="nav-stats" data-act="toggleNavMenu" aria-label="Seçenekler">
+      <span class="stat speed"><span id="speed-limit" class="limit" hidden></span><span><b id="speed-val">0</b><small>km/sa</small></span></span>
       <span class="stat eta"><b id="nav-eta">--:--</b><small>varış</small></span>
       <span class="stat"><b id="nav-rem">--</b><small id="nav-rem-u">dk</small></span>
       <span class="stat"><b id="nav-km">--</b><small id="nav-km-u">km</small></span>

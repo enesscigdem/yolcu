@@ -1,31 +1,35 @@
-// OpenFreeMap "liberty" stilini Apple Haritalar (iOS 26) görünümüne yaklaştırır:
-// sade açık zemin, yeşil araziler, gece lacivert, yumuşak binalar, navigasyonda gri yollar.
+// Harita görünümü: OpenFreeMap "liberty" stilini doğal, sakin renklere boyar;
+// arazi gölgesi, 3B arazi, ışıklı 3B binalar, gökyüzü, uydu katmanı ekler.
+// Not: MapLibre bina dokusu (cephe/pencere) ve gerçek gölge düşürmeyi desteklemez;
+// binalar OpenStreetMap'teki gerçek taban şekli ve yükseklikleriyle, yönlü ışıkla çizilir.
 const STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty';
 const DEM_URL = 'https://tiles.mapterhorn.com/{z}/{x}/{y}.webp';
 const SAT_URL = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
 
+export const ACCENT = '#2FC2B2';
+
 export const PALETTES = {
   light: {
-    land: '#F5F4F0', residential: '#F1EFEA', park: '#CDE6BF', wood: '#BFDFAE', water: '#86CDF5', sand: '#F2EAD3', ice: '#FFFFFF',
-    building: '#E9E7E2', building3d: '#F6F5F2', building3dTall: '#ECEAE5', hospital: '#F9E3E3', school: '#F1EBDD', aeroway: '#E9E7E1',
-    motorway: '#FFFFFF', motorwayCase: '#BCB7AE', primary: '#FFFFFF', primaryCase: '#CDC8BF',
-    secondary: '#FFFFFF', secondaryCase: '#D6D2CA', minor: '#FFFFFF', minorCase: '#DEDAD3', path: '#E4E0D8', rail: '#D2CEC6',
-    navRoad: '#A2A2A7', navRoadCase: '#E4E4E8', navMotorway: '#B5B5BA',
-    label: '#3A3A3C', district: '#8A8A8E', roadLabel: '#5C5C61', waterLabel: '#2F78B5', poiLabel: '#6B6B70', halo: '#FFFFFF', boundary: '#C3BFD0',
-    route: '#0A84FF', routeCase: '#0057D2', alt: '#8DBDF7', altCase: '#5E92D2', arrow: '#FFFFFF', arrowCase: '#1C1C1E',
-    shade: '#43523C', highlight: '#FFFFFF', shadeK: 0.45,
-    sky: '#B9DBF7', horizon: '#F1F6FB', fog: '#F5F4F0', light: 0.3
+    land: '#EFEDE8', residential: '#ECEAE4', park: '#D3E3C4', wood: '#C3D9B2', water: '#A9CDE6', sand: '#EDE5CF', ice: '#FFFFFF',
+    building: '#E2DFD8', building3d: '#F3F1ED', building3dTall: '#DAD6CE', hospital: '#F0E1DF', school: '#ECE6D8', aeroway: '#E6E3DC',
+    motorway: '#F6E2B8', motorwayCase: '#D7B87A', primary: '#FFFFFF', primaryCase: '#CFC9BE',
+    secondary: '#FFFFFF', secondaryCase: '#D7D2C9', minor: '#FFFFFF', minorCase: '#DFDAD2', path: '#E3DED4', rail: '#CFCAC0',
+    navRoad: '#A9A9AE', navRoadCase: '#E3E3E6', navMotorway: '#BDBDC2',
+    label: '#2E2E31', district: '#86868B', roadLabel: '#58585D', waterLabel: '#4A7FA8', poiLabel: '#6C6C71', halo: '#FFFFFF', boundary: '#C5C0CF',
+    route: '#14A596', routeCase: '#0B6B62', alt: '#9FB9B5', altCase: '#6F8C88', arrow: '#FFFFFF', arrowCase: '#1C1D20',
+    shade: '#47523F', highlight: '#FFFFFF', shadeK: 0.45,
+    sky: '#C9DCEB', horizon: '#F2F1EC', fog: '#EFEDE8', light: 0.5
   },
   dark: {
-    land: '#252C38', residential: '#28303D', park: '#24493B', wood: '#21443A', water: '#1C3B8C', sand: '#38382F', ice: '#3E4656',
-    building: '#2F3747', building3d: '#3A4356', building3dTall: '#465068', hospital: '#3A2F3B', school: '#33333E', aeroway: '#2C3442',
-    motorway: '#A3ACBD', motorwayCase: '#5E687B', primary: '#87909F', primaryCase: '#4A5366',
-    secondary: '#757E8E', secondaryCase: '#424B5C', minor: '#626B7B', minorCase: '#3A4253', path: '#4C5466', rail: '#4C5466',
-    navRoad: '#6E788B', navRoadCase: '#3F4859', navMotorway: '#8892A4',
-    label: '#F2F2F7', district: '#AEB4C2', roadLabel: '#C9CED8', waterLabel: '#8FB4F2', poiLabel: '#B8BDC8', halo: '#1F2631', boundary: '#6A6F86',
-    route: '#3D9BFF', routeCase: '#0A5BC4', alt: '#4E73A3', altCase: '#304D75', arrow: '#FFFFFF', arrowCase: '#000000',
-    shade: '#0A0F18', highlight: '#4C5A75', shadeK: 0.5,
-    sky: '#0E1628', horizon: '#2A3550', fog: '#252C38', light: 0.25
+    land: '#1A1B1E', residential: '#1E1F22', park: '#1B2820', wood: '#19261E', water: '#0F2234', sand: '#2B2A25', ice: '#34363B',
+    building: '#25272B', building3d: '#2C2E33', building3dTall: '#3B3E45', hospital: '#2D2427', school: '#2A2925', aeroway: '#24252A',
+    motorway: '#4A4436', motorwayCase: '#2E2A21', primary: '#3A3C42', primaryCase: '#242529',
+    secondary: '#34363B', secondaryCase: '#222326', minor: '#2E3035', minorCase: '#1F2023', path: '#2A2B2F', rail: '#2E3034',
+    navRoad: '#4A4D55', navRoadCase: '#26272B', navMotorway: '#5A5E66',
+    label: '#E6E6E8', district: '#8E8E93', roadLabel: '#A3A3A8', waterLabel: '#6E93B5', poiLabel: '#9A9A9F', halo: '#141517', boundary: '#4C4A55',
+    route: '#2FC2B2', routeCase: '#0E5A53', alt: '#4E6662', altCase: '#2C3B39', arrow: '#FFFFFF', arrowCase: '#000000',
+    shade: '#050608', highlight: '#3C4048', shadeK: 0.5,
+    sky: '#121418', horizon: '#26282D', fog: '#1A1B1E', light: 0.4
   }
 };
 
@@ -37,35 +41,44 @@ export async function loadStyle() {
   for (const l of style.layers) {
     const lay = l.layout || (l.layout = {});
     if (l.type === 'symbol' && /name/.test(JSON.stringify(lay['text-field'] || ''))) {
-      // Türkçe adlar, eğik yazı yok
       lay['text-field'] = ['coalesce', ['get', 'name:tr'], ['get', 'name'], ['get', 'name:latin']];
       const isWater = (l['source-layer'] || '').startsWith('water');
       if (l['source-layer'] === 'place') {
         lay['text-font'] = ['Noto Sans Bold'];
         if (l.id === 'label_other' || l.id === 'label_village') {
-          // Mahalle ve semtler: Apple gibi büyük harf, aralıklı
           lay['text-transform'] = 'uppercase';
-          lay['text-letter-spacing'] = 0.12;
-          lay['text-size'] = ['interpolate', ['linear'], ['zoom'], 11, 10, 15, 12.5];
+          lay['text-letter-spacing'] = 0.14;
+          lay['text-size'] = ['interpolate', ['linear'], ['zoom'], 11, 10, 15, 12];
         }
       } else if (!isWater) {
         lay['text-font'] = ['Noto Sans Regular'];
       }
     }
-    // Binalar: düz zemin 14'ten, 3B kabartma 16'dan sonra yumuşakça belirsin
     if (l.id === 'building') l.minzoom = 14;
-    if (l.id === 'building-3d') l.minzoom = 15.5;
-    if (l.id === 'poi_r20') l.minzoom = Math.max(l.minzoom || 0, 16);
+    if (l.id === 'building-3d') l.minzoom = 15;
+    if (l.id === 'poi_r20') l.minzoom = Math.max(l.minzoom || 0, 16.5);
+    if (l.id === 'poi_r7') l.minzoom = Math.max(l.minzoom || 0, 15.5);
   }
   style.sources.dem = { type: 'raster-dem', tiles: [DEM_URL], tileSize: 512, maxzoom: 12, encoding: 'terrarium', attribution: '© Mapterhorn' };
+  // 3B arazi için ayrı kaynak (MapLibre önerisi: gölge ve arazi aynı kaynağı paylaşmasın)
+  style.sources.dem3d = { type: 'raster-dem', tiles: [DEM_URL], tileSize: 512, maxzoom: 12, encoding: 'terrarium' };
   style.sources.sat = { type: 'raster', tiles: [SAT_URL], tileSize: 256, maxzoom: 19, attribution: 'Uydu © Esri, Maxar' };
   const waterIdx = style.layers.findIndex(l => l.id === 'water' || l['source-layer'] === 'water');
   style.layers.splice(waterIdx, 0, {
     id: 'yolcu-hillshade', type: 'hillshade', source: 'dem', maxzoom: 16,
-    paint: { 'hillshade-exaggeration': 0.45, 'hillshade-shadow-color': '#43523C', 'hillshade-highlight-color': '#FFFFFF', 'hillshade-illumination-direction': 315 }
+    paint: { 'hillshade-exaggeration': 0.45, 'hillshade-shadow-color': '#47523F', 'hillshade-highlight-color': '#FFFFFF', 'hillshade-illumination-direction': 315 }
   });
-  style.layers.splice(1, 0, { id: 'yolcu-sat', type: 'raster', source: 'sat', layout: { visibility: 'none' }, paint: { 'raster-fade-duration': 150 } });
+  style.layers.splice(1, 0, { id: 'yolcu-sat', type: 'raster', source: 'sat', layout: { visibility: 'none' }, paint: { 'raster-fade-duration': 150, 'raster-contrast': 0.08, 'raster-saturation': 0.08 } });
   return style;
+}
+
+// 3B arazi: eğik bakışta tepeler gerçekten yükselir
+export function setTerrain(map, on) {
+  try {
+    const cur = map.getTerrain && map.getTerrain();
+    if (on && !cur) map.setTerrain({ source: 'dem3d', exaggeration: 1.2 });
+    else if (!on && cur) map.setTerrain(null);
+  } catch { }
 }
 
 function roadKind(id) {
@@ -107,12 +120,12 @@ export function applyPalette(map, P, opts = {}) {
     }
     if (l.type === 'fill-extrusion') {
       vis(id, !sat);
-      set(id, 'fill-extrusion-color', ['interpolate', ['linear'], ['coalesce', ['get', 'render_height'], 0], 0, P.building3d, 50, P.building3dTall]);
-      set(id, 'fill-extrusion-opacity', 0.88);
+      // Yüksekliğe göre ton: alçak yapılar açık, yüksekler bir ton koyu → derinlik hissi
+      set(id, 'fill-extrusion-color', ['interpolate', ['linear'], ['coalesce', ['get', 'render_height'], 0], 0, P.building3d, 18, P.building3d, 60, P.building3dTall]);
+      set(id, 'fill-extrusion-opacity', 0.94);
       set(id, 'fill-extrusion-vertical-gradient', true);
-      // Yükseklik zoomla yumuşakça büyüsün (aniden kutu çıkmasın)
-      set(id, 'fill-extrusion-height', ['interpolate', ['linear'], ['zoom'], 15.5, 0, 16.5, ['*', 0.9, ['coalesce', ['get', 'render_height'], 6]]]);
-      set(id, 'fill-extrusion-base', ['interpolate', ['linear'], ['zoom'], 15.5, 0, 16.5, ['coalesce', ['get', 'render_min_height'], 0]]);
+      set(id, 'fill-extrusion-height', ['interpolate', ['linear'], ['zoom'], 15, 0, 16, ['coalesce', ['get', 'render_height'], 6]]);
+      set(id, 'fill-extrusion-base', ['interpolate', ['linear'], ['zoom'], 15, 0, 16, ['coalesce', ['get', 'render_min_height'], 0]]);
       continue;
     }
     if (l.type === 'line') {
@@ -127,7 +140,7 @@ export function applyPalette(map, P, opts = {}) {
         let color = k === 'rail' ? P.rail : k === 'path' ? P.path : casing ? P[k + 'Case'] : P[k];
         if (nav && k !== 'rail' && k !== 'path') color = casing ? P.navRoadCase : (k === 'motorway' ? P.navMotorway : P.navRoad);
         set(id, 'line-color', color);
-        set(id, 'line-opacity', sat ? (casing || k === 'minor' || k === 'path' ? 0 : 0.55) : 1);
+        set(id, 'line-opacity', sat ? (casing || k === 'minor' || k === 'path' ? 0 : 0.5) : 1);
       }
       continue;
     }
@@ -139,10 +152,10 @@ export function applyPalette(map, P, opts = {}) {
       else if (sl === 'poi' || sl === 'aerodrome_label') c = P.poiLabel;
       else if (id === 'label_other' || id === 'label_village') c = P.district;
       set(id, 'text-color', sat ? '#FFFFFF' : c);
-      set(id, 'text-halo-color', sat ? 'rgba(0,0,0,.75)' : P.halo);
-      set(id, 'text-halo-width', sat ? 1.6 : 1.5);
-      set(id, 'text-halo-blur', 0.5);
-      if (sl === 'poi') set(id, 'icon-opacity', nav ? 0 : 1), set(id, 'text-opacity', nav ? 0 : 1);
+      set(id, 'text-halo-color', sat ? 'rgba(0,0,0,.7)' : P.halo);
+      set(id, 'text-halo-width', sat ? 1.5 : 1.4);
+      set(id, 'text-halo-blur', 0.4);
+      if (sl === 'poi') { set(id, 'icon-opacity', nav ? 0 : 0.85); set(id, 'text-opacity', nav ? 0 : 1); }
     }
   }
   vis('yolcu-sat', sat);
@@ -150,11 +163,12 @@ export function applyPalette(map, P, opts = {}) {
   set('yolcu-hillshade', 'hillshade-shadow-color', P.shade);
   set('yolcu-hillshade', 'hillshade-highlight-color', P.highlight);
   set('yolcu-hillshade', 'hillshade-exaggeration', P.shadeK);
-  try { map.setLight({ anchor: 'viewport', color: '#ffffff', intensity: P.light, position: [1.3, 200, 40] }); } catch { }
+  // Işık: güneybatıdan, yüksek açıyla → binaların bir yüzü aydınlık, diğeri gölgeli
+  try { map.setLight({ anchor: 'map', color: '#ffffff', intensity: P.light, position: [1.15, 215, 30] }); } catch { }
   try {
     map.setSky({
-      'sky-color': sat ? '#7FB5E8' : P.sky, 'horizon-color': P.horizon, 'fog-color': sat ? '#C9D8E6' : P.fog,
-      'sky-horizon-blend': 0.6, 'horizon-fog-blend': 0.7, 'fog-ground-blend': 0.85, 'atmosphere-blend': 0.6
+      'sky-color': sat ? '#8DB7DE' : P.sky, 'horizon-color': P.horizon, 'fog-color': sat ? '#C9D6E2' : P.fog,
+      'sky-horizon-blend': 0.55, 'horizon-fog-blend': 0.8, 'fog-ground-blend': 0.9, 'atmosphere-blend': 0.5
     });
   } catch { }
   set('yolcu-alt-case', 'line-color', P.altCase);
