@@ -4,14 +4,28 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 const mins=s=>`${Math.max(0,Math.round(s/60))} dk`;
 const btn=(action,text,extra='')=>`<button type="button" data-rs="${action}" ${extra}>${text}</button>`;
 export class Roadside {
- constructor(deps){Object.assign(this,deps);this.assistant=new TripAssistant();this.version=0;this.cache=new Map();this.options=[];this.root=document.getElementById('roadside');this.root.addEventListener('click',e=>{const b=e.target.closest('[data-rs]');if(!b)return;e.preventDefault();this.action(b.dataset.rs,b).catch(()=>this.message('İşlem tamamlanamadı. Tekrar deneyebilirsin.'));});this.root.addEventListener('submit',e=>e.preventDefault());}
- body(html,title='Yol üstü'){this.root.hidden=false;document.body.classList.add('roadside-open');this.root.innerHTML=`<div class="roadside-head">${btn('home','‹','aria-label="Yol üstü ana menü"')}<h2>${esc(title)}</h2>${btn('close','×','aria-label="Yol üstünü kapat"')}</div><div class="roadside-content">${html}</div>`;this.onPanel?.();}
- close(){this.controller?.abort();this.assistant.cancel();this.version++;this.root.hidden=true;document.body.classList.remove('roadside-open');this.onPanel?.();}
- invalidate(){const hadResults=this.options.length,hadModel=!!this.assistant.controller;this.assistant.cancel();this.controller?.abort();this.version++;this.options=[];if(!this.root.hidden&&(this.busy||hadResults||hadModel))this.message('Rota değişti. Güncel güzergâhta tekrar ara.');this.busy=false;}
+ constructor(deps){Object.assign(this,deps);this.assistant=new TripAssistant();this.version=0;this.cache=new Map();this.options=[];this.root=document.getElementById('roadside');this.root.addEventListener('click',e=>{const b=e.target.closest('[data-rs]');if(!b)return;e.preventDefault();this.action(b.dataset.rs,b).catch(error=>{if(error.name!=='AbortError'&&!this.root.hidden)this.message('İşlem tamamlanamadı. Tekrar deneyebilirsin.');});});this.root.addEventListener('submit',e=>e.preventDefault());this.root.addEventListener('input',e=>{if(e.target.id==='stop-dwell')this.dwell=Math.max(0,Math.min(180,Number(e.target.value)||0));});}
+ body(html,title='Yol üstü',{replace=false,view=''}={}){
+  if(title===this.title&&view===this.view)replace=true;
+  if(!replace&&!this.root.hidden){this.history ||= [];this.history.push({content:this.root.querySelector('.roadside-content'),title:this.title,view:this.view,scroll:this.root.querySelector('.roadside-content')?.scrollTop||0});}
+  this.title=title;this.view=view;this.root.hidden=false;document.body.classList.add('roadside-open');
+  this.root.innerHTML=`<div class="roadside-head">${btn('back','‹','aria-label="Geri"')}<h2>${esc(title)}</h2>${btn('close','×','aria-label="Yol üstünü kapat"')}</div><div class="roadside-content">${html}</div>`;
+  this.syncPins();this.onPanel?.();
+ }
+ syncPins(){this.onResults?.(['results','detail'].includes(this.view)?this.options:[],this.view==='detail'?this.selectedIndex:null);}
+ back(){
+  this.controller?.abort();this.assistant.cancel();this.version++;this.busy=false;
+  const previous=this.history?.pop();if(!previous)return this.close();
+  this.body('',previous.title,{replace:true,view:previous.view});
+  this.root.querySelector('.roadside-content').replaceWith(previous.content);previous.content.scrollTop=previous.scroll;this.syncPins();this.onPanel?.();
+ }
+ close(){this.controller?.abort();this.assistant.cancel();this.version++;this.root.hidden=true;this.history=[];this.onResults?.([]);document.body.classList.remove('roadside-open');this.onPanel?.();}
+ invalidate(){this.history=[];const hadResults=this.options.length,hadModel=!!this.assistant.controller;this.assistant.cancel();this.controller?.abort();this.version++;this.options=[];if(!this.root.hidden&&(this.busy||hadResults||hadModel))this.message('Rota değişti. Güncel güzergâhta tekrar ara.');this.history=[];this.busy=false;}
  message(text){this.body(`<p class="rs-note" role="status">${esc(text)}</p>${btn('home','Kategorilere dön','class="btn"')}`);}
  home(){
+  this.assistant.cancel();this.history=[];this.root.hidden=true;
   this.controller?.abort();this.version++;this.busy=false;const ids=this.store.roadside.shortcuts||['fuel','market','duty','break','help'];
-  this.body(`${this.reminderText?`<p class="rs-note">${esc(this.reminderText)}</p>`:''}${this.pending?.needs?.length?`<p class="rs-note">Planın: ${this.pending.needs.map(id=>esc(needById(id)?.label)).join(' → ')}</p><div class="rs-tags">${this.pending.needs.map(id=>btn('category',esc(needById(id).label),`data-id="${id}"`)).join('')}</div>`:''}<div class="rs-grid">${ids.map(id=>this.categoryButton(id)).join('')}${btn('more','<b>＋</b> Diğer')}</div><div class="rs-links">${btn('stops','Duraklarım')}${btn('places','Benim yerlerim')}${btn('park','Park & araç')}${btn('preferences','Kısayollar & tercihler')}</div><form class="rs-command"><label for="trip-command">Yolculuk isteğini yaz</label><div class="rs-command-row"><input id="trip-command" maxlength="1200" placeholder="Eve giderken motorin ve Migros" autocomplete="off">${btn('interpret','Anla')}</div><label class="rs-check"><input id="use-trip-model" type="checkbox" ${hasServerAPI()?'':'disabled'}> Yapay zekâ ile çözümle</label>${hasServerAPI()?'':`<p class="rs-note">${SERVER_UNAVAILABLE}</p>`}<p class="rs-note">Seçmeden rota değişmez. Normal kategori aramaları model beklemez.</p></form>`);
+  this.body(`${this.reminderText?`<p class="rs-note">${esc(this.reminderText)}</p>`:''}${this.pending?.needs?.length?`<p class="rs-note">Planın: ${this.pending.needs.map(id=>esc(needById(id)?.label)).join(' → ')}</p><div class="rs-tags">${this.pending.needs.map(id=>btn('category',esc(needById(id).label),`data-id="${id}"`)).join('')}</div>`:''}<div class="rs-grid">${ids.map(id=>this.categoryButton(id)).join('')}${btn('more','<b>＋</b> Diğer')}</div><div class="rs-links">${btn('stops','Duraklarım')}${btn('places','Benim yerlerim')}${btn('park','Park & araç')}${btn('preferences','Kısayollar & tercihler')}</div><details class="rs-command-disclosure"><summary>Yolculuk isteğini yaz</summary><form class="rs-command"><label for="trip-command">Yolculuk isteğini yaz</label><div class="rs-command-row"><input id="trip-command" maxlength="1200" placeholder="Eve giderken motorin ve Migros" autocomplete="off">${btn('interpret','Anla')}</div><label class="rs-check"><input id="use-trip-model" type="checkbox" ${hasServerAPI()?'':'disabled'}> Yapay zekâ ile çözümle</label>${hasServerAPI()?'':`<p class="rs-note">${SERVER_UNAVAILABLE}</p>`}<p class="rs-note">Seçmeden rota değişmez. Normal kategori aramaları model beklemez.</p></form></details>`);
  }
  categoryButton(id){const c=needById(id);return c?btn('category',`<b aria-hidden="true">${esc(c.icon)}</b><span>${esc(c.label)}</span>`,`data-id="${id}"`):'';}
  listCategories(ids,title){this.body(`<div class="rs-grid">${ids.map(id=>this.categoryButton(id)).join('')}</div>`,title);}
@@ -20,14 +34,21 @@ export class Roadside {
   if(id==='duty'&&!hasServerAPI())return this.body(`<p class="rs-note" role="status">Bu yayında resmî nöbetçi eczane bağlantısı henüz bağlı değil. Normal eczane araması kullanılabilir; sonuçlar nöbetçi listesi değildir.</p>${this.categoryButton('pharmacy')}`,'Nöbetçi eczane');
   if(id==='break')return this.listCategories(['food','cafe','toilet','parking'],'Mola lazım');
   if(id==='help')return this.help();
-  const context=this.context();if(!context)return this.message('Önce bir hedefe rota oluştur. Yol üstündeki seçenekleri o güzergâha göre hesaplayacağım.');
-  this.assistant.cancel();this.controller?.abort();const ac=this.controller=new AbortController(),version=++this.version;this.busy=true;this.kind=id;this.offset=more?(this.offset||0)+3:0;
-  this.body('<p class="rs-note" role="status">Gerçek yol ağıyla ulaşım ve ek sürüş süreleri hesaplanıyor…</p><p class="rs-note">Konum takibi ve dönüş bilgileri devam ediyor.</p>',cat.label);
+  const context=this.context();if(!context&&this.hasTrip?.())return this.message('Yol üstünde arama için güncel konum bekleniyor. Tekrar dene.');
+  this.assistant.cancel();this.controller?.abort();const ac=this.controller=new AbortController(),version=++this.version;this.busy=true;this.kind=id;this.offset=more?(this.offset||0)+3:0;this.dwell=0;
+  this.body('<div class="rs-loading" role="status">İşletmeler aranıyor…</div>',cat.label,{replace:more});
   try{
    let find;
    if(id==='duty'){
     const r=await fetch('/api/duty',{signal:ac.signal});if(!r.ok)throw new Error('Resmî nöbet listesi alınamadı');const j=await r.json();const places=normalizeDuty(j.rows);if(!places.length)throw new Error('Güncel nöbet kaydı bulunamadı');find=async()=>places;
    }else find=(point,signal)=>this.findNearby(cat,point,signal);
+   if(!context){
+    const from=await this.position();ac.signal.throwIfAborted();
+    if(!from)throw new Error('Yakındaki yerler için güncel konum gerekiyor.');
+    const list=await find(from,ac.signal);ac.signal.throwIfAborted();if(version!==this.version)return;
+    this.options=list.filter(p=>Number.isFinite(p.lon)&&Number.isFinite(p.lat)).map(place=>({place,nearby:true,distanceM:dist(from.lon,from.lat,place.lon,place.lat)})).sort((a,b)=>a.distanceM-b.distanceM).slice(this.offset,this.offset+3);
+    this.optionsContext=null;this.busy=false;this.showOptions(true);return;
+   }
    // Cache candidates only; times are recalculated for the current position and current route.
    const cacheKey=id+':'+Math.round(context.from.lon*500)+':'+Math.round(context.from.lat*500),cached=this.cache.get(cacheKey);
    const finder=(p,s)=>{if(cached&&Date.now()-cached.t<90000)return Promise.resolve(cached.list);return find(p,s);};
@@ -38,11 +59,21 @@ export class Roadside {
    ac.signal.throwIfAborted();if(version!==this.version||this.context()?.route!==context.route)return;
    if(lists.length){this.cache.set(cacheKey,{t:Date.now(),list:lists});if(this.cache.size>12)this.cache.delete(this.cache.keys().next().value);}
    const cap=this.pending?.maxExtraMinutes;if(cap!=null)options=options.filter(x=>x.extraSeconds<=cap*60);
-   this.options=options;this.busy=false;this.optionsContext=context;this.showOptions();
+   this.options=options;this.busy=false;this.optionsContext=context;this.showOptions(true);
   }catch(error){if(!ac.signal.aborted&&version===this.version){this.busy=false;this.message(error.message||'Arama tamamlanamadı');}}
  }
- showOptions(){
-  const kind=this.kind,cat=needById(kind);this.body(`<p class="rs-note">Ek sürüş, ulaşma ve yeniden yola katılmayı kapsar. İşletmede kalma süresi ayrıdır.${kind==='fuel'?` ${this.store.roadside.fuel==='diesel'?'Motorin':'Benzin'} tercihin kayıtlı; istasyonun yakıt stoğu doğrulanmış değil.`:''}${kind==='parking'?' Canlı doluluk bilinmiyor; yer garantisi yok.':''}</p><label class="rs-inline">Durakta kalacağım süre <input id="stop-dwell" type="number" min="0" max="180" value="0" inputmode="numeric"> dk</label>${this.options.length?this.options.map((o,i)=>`<article class="rs-result"><h3>${esc(o.place.name)}</h3><p>${esc(o.place.sub)}</p><div class="rs-tags"><span>Ulaşım ~${mins(o.reachSeconds)}</span><strong>Ek sürüş ${o.extraSeconds>=0?'+':'−'}${mins(Math.abs(o.extraSeconds))}</strong>${o.walkRoute?`<span>Sonrasında yürüyüş ${mins(o.walkRoute.time)}</span>`:''}</div><p class="rs-note">${o.live?'Canlı trafik ile hesaplandı':'Tahmini süre · bu seçenek için canlı trafik yok'}</p><p class="rs-availability ${o.availability?.state||'unknown'}">${esc(o.availability?.label||openingAt(o.place).label)}</p>${o.place.phone?`<a class="pill-btn" href="tel:${esc(o.place.phone.replace(/[^+\d]/g,''))}">Ara</a>`:''}<div class="rs-result-actions">${btn('add',o.walkRoute?'Otoparka git':'Durağa ekle',`class="btn primary stop-choice" data-index="${i}"`)}${btn('savePlace','☆',`aria-label="Benim yerlerime kaydet" data-index="${i}"`)}</div></article>`).join(''):'<p class="rs-note">Koşullara uyan, süresi hesaplanabilen sonuç yok. Bilinmeyen saatler açık sayılmadı.</p>'}${btn('moreResults','Diğer sonuçları hesapla','class="btn"')}`,cat?.label||'Sonuçlar');
+ timing(o){
+  if(o.nearby)return `<span>${o.distanceM>=1000?(o.distanceM/1000).toFixed(1).replace('.',',')+' km':Math.round(o.distanceM/10)*10+' m'} · kuş uçuşu</span>`;
+  const rounded=Math.round(o.extraSeconds/60),delta=rounded===0?'1 dk’dan az fark':`${rounded>0?'+':'−'}${Math.abs(rounded)} dk`;
+  return `<span>İşletmeye ~${mins(o.reachSeconds)}</span><strong>Yolculuğa ${delta}</strong>`;
+ }
+ showOptions(replace=false){
+  this.body(`<p class="rs-note">${this.optionsContext?'Hesaplanan seçenekler ek sürüş süresine göre sıralı.':'Konumuna en yakın yerler · yol süresi henüz hesaplanmadı.'}</p>${this.options.map((o,i)=>`<article class="rs-result rs-summary">${btn('detail',`<span class="rs-number">${i+1}</span><span><h3>${esc(o.place.name)}</h3><p>${esc(o.place.sub||'Adres bilgisi yok')}</p><span class="rs-tags">${this.timing(o)}</span></span><span aria-hidden="true">›</span>`,`data-index="${i}" aria-label="${esc(o.place.name)} detayları"`)}</article>`).join('')||'<p class="rs-note">Koşullara uyan sonuç bulunamadı.</p>'}${btn('moreResults','Diğer sonuçlar','class="btn"')}`,needById(this.kind)?.label||'Yakında bul',{replace,view:'results'});
+ }
+ detail(index){
+  if(this.view==='detail'){this.back();}
+  const o=this.options[index];if(!o)return;this.selectedIndex=index;
+  this.body(`<article class="rs-place"><div class="rs-place-heading"><span class="rs-number">${index+1}</span><div><p class="rs-eyebrow">${esc(needById(this.kind)?.label)}</p><h3>${esc(o.place.name)}</h3></div>${btn('savePlace','☆',`data-index="${index}" aria-label="Benim yerlerime kaydet"`)}</div><p>${esc(o.place.sub||'Adres bilgisi sağlayıcıda yok')}</p><div class="rs-tags">${this.timing(o)}</div>${o.nearby?'':`<p class="rs-note">İşletmeye ulaşım, ek sürüşün içindedir; ayrıca eklenmez. Duraklama süresi ayrıdır.</p><label class="rs-inline">Duraklama <input id="stop-dwell" type="number" min="0" max="180" value="${this.dwell||0}" inputmode="numeric"> dk</label><p class="rs-note">${o.live?'Canlı trafik ile hesaplandı':'Tahmini süre · canlı trafik yok'}${o.walkRoute?' · sonrasında yürüyüş '+mins(o.walkRoute.time):''}</p>`}<p class="rs-availability ${o.availability?.state||'unknown'}">${esc(o.availability?.label||openingAt(o.place).label)}</p>${this.kind==='parking'?'<p class="rs-note">Canlı doluluk bilinmiyor; yer garantisi yok.</p>':''}${this.kind==='fuel'?'<p class="rs-note">Yakıt stoğu doğrulanmış değil.</p>':''}<div class="rs-links">${btn('focus','Haritada göster',`data-index="${index}"`)}${o.place.phone?`<a class="pill-btn" href="tel:${esc(o.place.phone.replace(/[^+\d]/g,''))}">Ara</a>`:''}</div><div class="rs-result-actions">${btn(o.nearby?'directions':'add',o.nearby?'Yol tarifi':o.walkRoute?'Otoparka git':'Durak ekle',`class="btn primary stop-choice" data-index="${index}"`)}</div></article>`, o.place.name, {view:'detail'});
  }
  async parkingOptions(c,cat,signal){
   const [list,baseline]=await Promise.all([this.findNearby(cat,c.to,signal),this.planner(c.from,c.to,c.prefs,c.avoids,signal,'auto',c.traffic,null,c.stops)]),near=list.filter(p=>dist(p.lon,p.lat,c.to.lon,c.to.lat)<2500).sort((a,b)=>dist(a.lon,a.lat,c.to.lon,c.to.lat)-dist(b.lon,b.lat,c.to.lon,c.to.lat)).slice(this.offset,this.offset+3);
@@ -68,7 +99,7 @@ export class Roadside {
  }
  async action(action,b){const value=id=>this.root.querySelector('#'+id)?.value||'';
   switch(action){
-   case 'close':return this.close();case 'home':return this.home();case 'category':return this.search(b.dataset.id);case 'more':return this.listCategories(NEEDS.map(c=>c.id),'Diğer ihtiyaçlar');case 'moreResults':return this.search(this.kind,true);
+   case 'back':return this.back();case 'detail':return this.detail(+b.dataset.index);case 'focus':return this.onFocus?.(this.options[+b.dataset.index]?.place);case 'directions':{const p=this.options[+b.dataset.index]?.place;if(!p)return;this.close();return this.onGo(p,'auto');}case 'close':return this.close();case 'home':return this.home();case 'category':return this.search(b.dataset.id);case 'more':return this.listCategories(NEEDS.map(c=>c.id),'Diğer ihtiyaçlar');case 'moreResults':return this.search(this.kind,true);
    case 'stops':return this.renderStops();case 'preferences':return this.preferences();case 'places':return this.places();case 'park':return this.park();case 'reminders':return this.reminders();case 'interpret':return this.interpret();
    case 'savePreferences':{const shortcuts=[...this.root.querySelectorAll('[name=rs-shortcut]:checked')].map(x=>x.value);if(!shortcuts.length||shortcuts.length>5)return this.toast('1–5 kısayol seç');this.store.roadside={...this.store.roadside,fuel:value('fuel-kind'),brands:value('fuel-brands').split(',').map(x=>x.trim()).filter(Boolean).slice(0,10),shortcuts,assistance:{name:value('assistance-name').slice(0,80),phone:value('assistance-phone').replace(/[^+\d]/g,'')}};this.save();this.home();return this.toast('Tercihler kaydedildi');}
    case 'savePlace':{const p=this.options[+b.dataset.index]?.place;if(!p)return;this.savePlace(p);b.textContent='★';return;}

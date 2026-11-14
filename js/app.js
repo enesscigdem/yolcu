@@ -38,8 +38,20 @@ const S = {
 const fixes = new FixStream(), diagnostics = new Diagnostics(), camera = new FollowCamera();
 const key = () => store.tomtomKey;
 function tripContext(){const route=S.navRoute||S.routes[S.sel];if(!route||!S.pos||Date.now()-S.pos.t>5000)return null;return {route,along:S.nav?.along||0,from:{...S.pos},to:S.dest,prefs:{...store.prefs},avoids:[...structuredClone(store.avoids),...(S.tripAvoids||[])],stops:structuredClone(S.stops||route.stops||[]),traffic:trafficProvider(),manualOrder:!!S.stopOrderManual,activeDwellSeconds:remainingDwellSeconds([],S.activeDwell)};}
-const roadside=new Roadside({store,save,planner:api.planRoutes,canPark:()=>!S.sim||PREVIEW,position:()=>PREVIEW&&S.pos?Promise.resolve({...S.pos,t:Date.now()}):freshPosition(),context:tripContext,toast,
+let roadsideMarkers=[];
+const roadside=new Roadside({store,save,planner:api.planRoutes,canPark:()=>!S.sim||PREVIEW,position:()=>PREVIEW&&S.pos?Promise.resolve({...S.pos,t:Date.now()}):freshPosition(),context:()=>S.nav?tripContext():null,hasTrip:()=>!!S.nav,toast,
  findNearby:async(cat,point,signal)=>{if(key()){try{const found=await traffic.poiSearch(key(),cat,point,signal);if(found.length)return found;}catch(e){if(e.name==='AbortError')throw e;}}const list=await api.nearby({...cat,r:3500,fallback:cat.label},point,signal);return cat.brand?list.filter(p=>(p.name+' '+p.brand).toLocaleLowerCase('tr-TR').includes(cat.brand.toLocaleLowerCase('tr-TR'))):list;},
+ onResults:(options,selected)=>{
+  roadsideMarkers.forEach(m=>m.remove());roadsideMarkers=[];
+  if(!S.mapReady)return;
+  if(options.length&&selected==null&&!S.nav){const bounds=new maplibregl.LngLatBounds();options.forEach(o=>bounds.extend([o.place.lon,o.place.lat]));if(S.pos)bounds.extend([S.pos.lon,S.pos.lat]);S.map.fitBounds(bounds,{padding:{top:70,bottom:$('roadside').getBoundingClientRect().height+30,left:36,right:36},maxZoom:15,duration:500});}
+  options.forEach((o,i)=>{
+   const el=document.createElement('button');el.type='button';el.className='rs-map-pin'+(i===selected?' selected':'');el.textContent=String(i+1);el.setAttribute('aria-label',o.place.name+' detayları');
+   el.addEventListener('click',e=>{e.stopPropagation();roadside.detail(i);});
+   roadsideMarkers.push(new maplibregl.Marker({element:el,anchor:'bottom'}).setLngLat([o.place.lon,o.place.lat]).addTo(S.map));
+  });
+ },
+ onFocus:p=>{if(!p||!S.mapReady)return;if(S.nav)S.follow=false;S.map.easeTo({center:[p.lon,p.lat],zoom:16,padding:{top:S.nav?160:30,bottom:$('roadside').getBoundingClientRect().height+30,left:24,right:24},duration:500});},
  savePlace:p=>{if(!isSaved(p))toggleSaved(p);},
  onPickEntrance:p=>{if(S.nav)return toast('Araç girişi kaydetmek için sürüşü bitir');S.entranceGoal={...p};roadside.close();goHome();sheet.set('peek');S.map?.easeTo({center:[p.lon,p.lat],zoom:17,pitch:0,duration:700});toast('Haritada araç girişine basılı tut, ardından Giriş olarak kaydet seç',6000);},
  onPanel:()=>{if(S.nav&&S.pos)navTick({...S.pos,_received:performance.now()});},

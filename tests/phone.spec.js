@@ -74,7 +74,7 @@ test('fuel stop adds and removes a real multi-leg route while preserving avoids'
   const requests=[];page.on('request',r=>{if(r.url().includes('valhalla1')&&r.url().endsWith('/route'))requests.push(r.postDataJSON());});
   await page.evaluate(()=>__yolcu.store.avoids=[{lat:38.4,lon:27.4,name:'Test yolu'}]);
   await routes(page);await page.locator('[data-act=preview]').click();await page.locator('#nav-dist').waitFor({state:'visible'});await page.locator('#nav-bottom [data-act=openRoadside]').click();await page.locator('[data-rs=category][data-id=fuel]').click();
-  await expect(page.locator('.stop-choice')).toHaveCount(1);await page.locator('.stop-choice').click();
+  await page.locator('[data-rs=detail]').first().click();await expect(page.locator('.stop-choice')).toHaveCount(1);await page.locator('.stop-choice').click();
   await page.waitForFunction(()=>__yolcu.S.navRoute?.stops?.length===1);
   expect(await page.evaluate(()=>__yolcu.S.navRoute.legEnds.length)).toBe(2);
   await page.locator('[data-act=toggleNavMenu]').click();await page.locator('[data-act=removeStop]').click();await page.waitForFunction(()=>__yolcu.S.navRoute?.stops?.length===0);
