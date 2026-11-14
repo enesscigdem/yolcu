@@ -53,7 +53,7 @@ test('nearby places work without a route; detail, pins and back preserve context
 
 test('map selection retains results and stop duration and never shows minus zero',async({page})=>{
  const errors=await setup(page);await mocks(page);await drive(page);await freeze(page);await open(page);await page.locator('[data-rs=category][data-id=fuel]').click();await expect(page.locator('.rs-summary')).not.toHaveCount(0);
- await page.evaluate(()=>{__yolcu.roadside.options[0].extraSeconds=-2;__yolcu.roadside.showOptions(true);});await expect(page.locator('#roadside')).toContainText('1 dk’dan az fark');await expect(page.locator('#roadside')).not.toContainText('−0');
+ await page.waitForFunction(()=>!__yolcu.roadside.busy);await page.evaluate(()=>{__yolcu.roadside.options[0].extraSeconds=-2;__yolcu.roadside.showOptions(true);});await expect(page.locator('#roadside')).toContainText('1 dk’dan az fark');await expect(page.locator('#roadside')).not.toContainText('−0');
  await page.locator('.rs-map-pin').first().evaluate(el=>el.click());await expect(page.locator('.rs-place')).toBeVisible();await page.locator('#stop-dwell').fill('10');await page.locator('[data-rs=back]').click();await page.locator('[data-rs=detail]').first().click();await expect(page.locator('#stop-dwell')).toHaveValue('10');
  await page.evaluate(()=>__yolcu.roadside.invalidate());await expect(page.locator('#roadside')).toContainText('Rota değişti');await page.locator('[data-rs=back]').click();await expect(page.locator('#roadside')).toBeHidden();await expect(page.locator('.rs-map-pin')).toHaveCount(0);await expect(page.locator('#nav')).toBeVisible();expect(errors).toEqual([]);
 });

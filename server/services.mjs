@@ -20,7 +20,7 @@ export async function trafficProxy(url,req,signal,readBody){
  const tile=/^\/traffic\/map\/4\/tile\/flow\/relative\/\d{1,2}\/\d{1,7}\/\d{1,7}\.pbf$/.test(path);
  if(!(search||route||incident||tile)||url.search.length>5000||url.searchParams.has('key'))throw fail('Desteklenmeyen trafik isteği.',400,'invalid_request');
  if(req.method!=='GET'&&!(route&&req.method==='POST'))throw fail('Yöntem desteklenmiyor.',405,'invalid_request');
- budget(req.socket.remoteAddress,'traffic',tile?600:120);
+ budget(req.socket.remoteAddress,tile?'traffic-tiles':'traffic-api',tile?600:120);
  const allowed=new Set(search?['countrySet','language','limit','typeahead','lat','lon','radius','categorySet','brandSet','openingHours','timeZone']:route?['traffic','sectionType','computeTravelTimeFor','routeType','travelMode','reconstructionMode','routeRepresentation']:incident?['bbox','fields','language','timeValidityFilter']:[]);if([...url.searchParams.keys()].some(k=>!allowed.has(k)))throw fail('Desteklenmeyen trafik parametresi.',400,'invalid_request');
  const target=new URL(host+path);for(const [k,v] of url.searchParams)target.searchParams.set(k,v);target.searchParams.set('key',key);
  if(search){target.searchParams.set('limit',String(Math.max(1,Math.min(25,Number(target.searchParams.get('limit'))||15))));if(target.searchParams.has('radius'))target.searchParams.set('radius',String(Math.max(1,Math.min(10000,Number(target.searchParams.get('radius'))||3500))));}

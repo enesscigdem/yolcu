@@ -7,7 +7,7 @@ const mins=s=>`${Math.max(0,Math.round(s/60))} dk`;
 const btn=(action,text,extra='')=>`<button type="button" data-rs="${action}" ${extra}>${text}</button>`;
 export class Roadside {
  constructor(deps){Object.assign(this,deps);this.assistant=new TripAssistant();this.version=0;this.cache=new Map();this.options=[];this.root=document.getElementById('roadside');this.root.addEventListener('click',e=>{const b=e.target.closest('[data-rs]');if(!b)return;e.preventDefault();this.action(b.dataset.rs,b).catch(error=>{if(error.name!=='AbortError'&&!this.root.hidden)this.message('İşlem tamamlanamadı. Tekrar deneyebilirsin.');});});this.root.addEventListener('submit',e=>e.preventDefault());this.root.addEventListener('input',e=>{if(e.target.id==='stop-dwell'){this.dwell=Math.max(0,Math.min(180,Number(e.target.value)||0));this.updateImpact();}});}
- body(html,title='Yol üstü',{replace=false,view=''}={}){
+ body(html,title=this.hasTrip?.()?'Yol üstü':'Yakında bul',{replace=false,view=''}={}){
   if(title===this.title&&view===this.view)replace=true;
   if(!replace&&!this.root.hidden){this.history ||= [];this.history.push({content:this.root.querySelector('.roadside-content'),title:this.title,view:this.view,scroll:this.root.querySelector('.roadside-content')?.scrollTop||0});}
   this.title=title;this.view=view;this.root.hidden=false;document.body.classList.add('roadside-open');

@@ -30,3 +30,7 @@ test('traffic gateway injects the server credential and refuses client keys and 
  for(const p of ['/api/traffic/https://evil.invalid/','/api/traffic/search/2/search/Konak.json?key=client-secret','/api/traffic/not-allowed'])assert.equal((await request(base+p,{headers})).status,400);assert.equal(calls,1);
  }finally{global.fetch=realFetch;if(before===undefined)delete process.env.TOMTOM_API_KEY;else process.env.TOMTOM_API_KEY=before;}
 }));
+test('traffic tile requests cannot exhaust the separate routing/search budget',()=>localServer(async base=>{
+ const before=process.env.TOMTOM_API_KEY,realFetch=global.fetch;process.env.TOMTOM_API_KEY='only-test-server-key';global.fetch=async()=>new Response('{"results":[]}');
+ try{for(let i=0;i<121;i++)assert.equal((await request(base+'/api/traffic/traffic/map/4/tile/flow/relative/1/0/0.pbf',{headers})).status,200);assert.equal((await request(base+'/api/traffic/search/2/search/Konak.json?limit=1',{headers})).status,200);}finally{global.fetch=realFetch;if(before===undefined)delete process.env.TOMTOM_API_KEY;else process.env.TOMTOM_API_KEY=before;}
+}));

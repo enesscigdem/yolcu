@@ -1031,10 +1031,13 @@ function viewWhere() {
 }
 
 function render() {
+  let comparisonExpired=false;
+  if(S.view==='routes'&&!S.nav&&S.routes.length&&S.routes.some(r=>r.trafficTime)&&!S.routes.every(r=>hasFreshTraffic(r))){const chosen=S.routes[S.sel];S.routes=api.rankRoutes(S.routes,store.prefs);S.sel=Math.max(0,S.routes.indexOf(chosen));comparisonExpired=true;}
   const v = { home: viewHome, search: viewSearch, place: viewPlace, routes: viewRoutes, where: viewWhere, incident: viewIncident, history: viewHistory }[S.view];
   if (S.view === 'search' && $('q')) { $('results').innerHTML = resultsHtml(S.results); return; }
   sheet.body.innerHTML = v();
   sheet.el.dataset.view = S.view;
+  if(comparisonExpired&&S.mapReady)drawRoutes();
   // Görünüm değiştiyse içerik yumuşakça belirsin
   if (S.lastView !== S.view) {
     S.lastView = S.view;
@@ -2056,7 +2059,7 @@ function boot() {
   if (PREVIEW) onPos({ lon: 27.1045, lat: 38.3695, acc: 8, speed: 0, heading: null, t: Date.now() });
   else startGeo();
   setInterval(() => {
-    checkTheme();if(S.view==='routes'&&!S.nav){render();setJams(hasFreshTraffic(S.routes[S.sel])?S.routes[S.sel].jams:[]);}
+    checkTheme();if(S.view==='routes'&&!S.nav){const scroll=sheet.body.scrollTop;render();sheet.body.scrollTop=scroll;}
     if (S.view === 'home' && !S.nav) { refreshHello(); if (sheet.detent === 'peek') { const sc = sheet.body.scrollTop; render(); sheet.body.scrollTop = sc; } }
   }, 60000);
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
