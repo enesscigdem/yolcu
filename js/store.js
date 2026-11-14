@@ -29,6 +29,7 @@ const DEFAULTS = {
     soundMode: 'silent',
     maxExtraMinutes: 5,
     theme: 'auto',
+    relief: false,      // arazi DEM katmanı isteğe bağlıdır; 3B binalardan bağımsız
     tilt: true,          // 3B görünüm
     traffic: true,       // trafik katmanı (anahtar varsa)
     mapType: 'standard', // standard | satellite

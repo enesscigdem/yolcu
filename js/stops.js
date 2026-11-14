@@ -27,8 +27,9 @@ export async function stopOptions(context,findNearby,signal,planner=planRoutes){
   const offset=context.offset||0;
   const picks=choices.slice(0,Math.max(3,Math.min(18,context.candidateLimit||12)));
   if(!picks.length)return [];
+  context.onCandidates?.(picks);
   const baseline=await planner(from,to,prefs,avoids,signal,route.mode||'auto',traffic,null,stops);
-  const results=await boundedSettled(picks,3,async place=>{const ordered=context.manualOrder?[...stops,place]:[...stops,place].sort((a,b)=>(a.along??a.projection?.along??Infinity)-(b.along??b.projection?.along??Infinity));return {place,stops:ordered,route:(await planner(from,to,prefs,avoids,signal,route.mode||'auto',traffic,null,ordered))[0]};},signal);
+  const results=await boundedSettled(picks,3,async place=>{const ordered=context.manualOrder?[...stops,place]:[...stops,place].sort((a,b)=>(a.along??a.projection?.along??Infinity)-(b.along??b.projection?.along??Infinity));return {place,stops:ordered,route:(await planner(from,to,prefs,avoids,signal,route.mode||'auto',traffic,null,ordered))[0]};},signal,context.onProgress);
   signal?.throwIfAborted();
   const found=results.filter(r=>r.status==='fulfilled').map(r=>r.value);
   const live=hasFreshTraffic(baseline[0])&&found.every(x=>hasFreshTraffic(x.route));
@@ -40,9 +41,9 @@ export function remainingDwellSeconds(stops,active,now=Date.now()){
   return (stops||[]).reduce((sum,p)=>sum+Math.max(0,p.dwellMinutes||0)*60,0)+Math.max(0,((active?.until??now)-now)/1000);
 }
 
-async function boundedSettled(items,concurrency,work,signal){
- const results=new Array(items.length);let next=0;
+async function boundedSettled(items,concurrency,work,signal,onProgress){
+ const results=new Array(items.length);let next=0,completed=0;
  await Promise.all(Array.from({length:Math.min(concurrency,items.length)},async()=>{
-  while(next<items.length){signal?.throwIfAborted();const index=next++;try{results[index]={status:'fulfilled',value:await work(items[index])};}catch(reason){signal?.throwIfAborted();results[index]={status:'rejected',reason};}}
+  while(next<items.length){signal?.throwIfAborted();const index=next++;try{results[index]={status:'fulfilled',value:await work(items[index])};}catch(reason){signal?.throwIfAborted();results[index]={status:'rejected',reason};}finally{onProgress?.(++completed,items.length);}}
  }));return results;
 }

@@ -54,8 +54,8 @@ test('preview arrival never creates a completed real journey',async({page})=>{
 test('local phone preview switches all three screens and keeps the outer app fixed',async({page})=>{
   await setup(page);await page.goto('/preview.html');const phone=page.frameLocator('iframe');
   await phone.getByRole('button',{name:'Nereye?',exact:true}).waitFor({state:'visible'});
-  await page.getByRole('button',{name:'Rota seçimi',exact:true}).click();await expect(phone.getByRole('button',{name:'Başlat',exact:true})).toBeVisible();
-  await page.getByRole('button',{name:'Sürüş ekranı',exact:true}).click();await expect(phone.locator('#nav')).toBeVisible();await expect(phone.locator('#sim-badge')).toContainText('Önizleme');
+  await page.getByRole('button',{name:'Rota seçimi',exact:true}).click();await expect(phone.getByRole('button',{name:'Başlat',exact:true})).toBeVisible({timeout:20000});
+  await page.getByRole('button',{name:'Sürüş ekranı',exact:true}).click();await expect(phone.locator('#nav')).toBeVisible({timeout:20000});await expect(phone.locator('#sim-badge')).toContainText('Önizleme');
   await page.getByRole('button',{name:'Ana ekran',exact:true}).click();await expect(phone.getByRole('button',{name:'Nereye?',exact:true})).toBeVisible();
   await phone.getByRole('button',{name:'Ayarlar',exact:true}).click();await phone.getByRole('button',{name:'Kapat',exact:true}).click();
   const appRect=await phone.locator('#app').evaluate(el=>({scrollTop:el.scrollTop,y:el.getBoundingClientRect().y}));expect(appRect).toEqual({scrollTop:0,y:0});

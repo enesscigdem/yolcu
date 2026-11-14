@@ -31,7 +31,7 @@ test('comfort preference has a hard extra-time limit, including traffic and rera
   const fast=route(600,7000,8),comfort=route(899,0,1),tooSlow=route(910,0,0);
   let ranked=rankRoutes([fast,comfort,tooSlow],{highways:true,maxExtraMinutes:5});assert.equal(ranked[0],comfort);assert.equal(comfort.extraSeconds,299);assert.ok(comfort.reasons.includes('Daha az dönüş'));
   ranked=rankRoutes(ranked,{highways:true,maxExtraMinutes:0});assert.equal(ranked[0],fast);assert.equal(comfort.best,undefined);
-  comfort.trafficTime=1100;ranked=rankRoutes(ranked,{highways:true,maxExtraMinutes:5});assert.equal(ranked[0],fast);
+  for(const r of ranked){r.trafficTime=r.time;r.trafficCheckedAt=Date.now();}comfort.trafficTime=1100;ranked=rankRoutes(ranked,{highways:true,maxExtraMinutes:5});assert.equal(ranked[0],fast);
 });
 test('missing road analysis does not generate positive main-road or hill claims',()=>{
   const r={time:600,mode:'auto',maneuvers:[]};rankRoutes([r],{maxExtraMinutes:5});assert.deepEqual(r.reasons,[]);

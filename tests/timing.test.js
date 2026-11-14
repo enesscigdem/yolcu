@@ -28,3 +28,7 @@ test('a wider candidate pool is compared by full route time before taking the fi
  const options=await stopOptions({route:r,along:0,from:{lon:27,lat:38},to:{lon:27,lat:38.1},prefs:{},avoids:[],stops:[]},async()=>places,new AbortController().signal,planner);
  assert.equal(options[0].place.name,'place-9');assert.equal(options.length,3);assert.ok(peak<=3);
 });
+test('a confirmed large provider delay is retained rather than silently clamped to a guessed speed',()=>{
+ const now=1000000;const r={...route,trafficTime:13440,trafficDelay:11640,trafficCheckedAt:now};
+ const t=navigationTiming(r,{remS:1800,remM:19000},0,null,now);assert.equal(t.totalSeconds,13440);assert.equal(t.live,true);
+});

@@ -11,8 +11,8 @@ test('search, business detail and route back keep the query and calling screen',
  await page.locator('[data-act=backScreen]').click();await expect(page.locator('#q')).toHaveValue(p.name);await expect(page.locator('[data-act=pick]').first()).toBeVisible();await page.locator('[data-act=cancelSearch]').click();await expect(page.locator('.home-discover')).toBeVisible();expect(errors).toEqual([]);
 });
 test('settings subflows return to settings and canceling an address does not leak pick mode',async({page})=>{
- await setup(page);await page.locator('[data-act=openSettings]').click();await page.locator('#settings [data-act=personalPlaces]').click();await page.locator('[data-rs=back]').click();await expect(page.locator('#settings')).toBeVisible();
- await page.locator('[data-act=setFav][data-k=work]').click();await page.locator('[data-act=cancelSearch]').click();await expect(page.locator('#settings')).toBeVisible();await page.locator('[data-act=closeSettings]').click();await page.locator('[data-act=openSearch]').click();expect(await page.evaluate(()=>__yolcu.S.pickFor)).toBeNull();
+ await setup(page);await page.locator('[data-act=openSettings]').click();await page.locator('[data-act=openSettingsSection][data-section=journey]').click();await page.locator('#settings [data-act=personalPlaces]').click();await page.locator('[data-rs=back]').click();await expect(page.locator('#settings')).toBeVisible();
+ await page.locator('[data-act=setFav][data-k=work]').click();await page.locator('[data-act=cancelSearch]').click();await expect(page.locator('#settings')).toBeVisible();await page.locator('[data-act=closeSettings]').click();await page.locator('[data-act=closeSettings]').click();await page.locator('[data-act=openSearch]').click();expect(await page.evaluate(()=>__yolcu.S.pickFor)).toBeNull();
 });
 test('model selection uses a dynamic server catalog and handles a model lock without invented choices',async({page})=>{
  const errors=await setup(page);let chosen=null;const models=[{id:'account-a',label:'Hesap modeli A'},{id:'account-b',label:'Hesap modeli B'},{id:'account-c',label:'Hesap modeli C'}];
@@ -35,4 +35,37 @@ test('home favorites and primary controls fit narrow and large phones in both th
 test('dwell updates total arrival impact once and result selection survives map/list changes',async({page})=>{
  await setup(page);await page.route('**/*overpass*/**',r=>r.fulfill({json:{elements:multi[0].stops.map(p=>({lat:p.lat,lon:p.lon,tags:{name:p.name,amenity:'fuel'}}))}}));await routes(page);await page.locator('[data-act=preview]').click();await page.waitForFunction(()=>__yolcu.S.sim);await page.evaluate(()=>{const {S}=__yolcu;S.sim.pause();setInterval(()=>__yolcu.onPos({...S.pos,speed:0,t:Date.now()}),500);});
  await page.locator('#nav-bottom [data-act=openRoadside]').click();await page.locator('[data-rs=category][data-id=fuel]').click();await page.locator('[data-rs=detail]').first().click();const old=await page.locator('#rs-impact b').innerText();await page.locator('#stop-dwell').fill('10');const expected=await page.evaluate(()=>Math.round((__yolcu.roadside.options[0].totalSeconds+600)/60)+' dk');await expect(page.locator('#rs-impact b')).toHaveText(expected);expect(expected).not.toBe(old);await expect(page.locator('#rs-impact')).toContainText('duraklama dahil');await expect(page.locator('#nav')).toBeVisible();
+});
+
+test('a static or failed model endpoint does not invent choices or prevent routing; leaving cancels stale catalog UI',async({page})=>{
+ await setup(page);let requests=0,release;const gate=new Promise(r=>release=r);
+ await page.route('**/api/ai/models',async r=>{if(++requests===1)return r.fulfill({status:200,contentType:'text/html',body:'<html>static host</html>'});await gate;try{await r.fulfill({json:{models:[{id:'late-account-model'}],model:null}});}catch{}});
+ await page.locator('[data-act=openSettings]').click();await page.locator('[data-act=openModels]').click();await expect(page.locator('.model-status')).toContainText('Normal arama ve yol tarifi');await expect(page.getByRole('radio')).toHaveCount(0);
+ await page.locator('[data-act=closeSettings]').click();await page.locator('[data-act=openModels]').click();await expect(page.locator('.model-status')).toContainText('yükleniyor');await page.locator('[data-act=closeSettings]').click();release();await expect(page.locator('.page-head h1')).toHaveText('Ayarlar');await expect(page.locator('.model-options')).toHaveCount(0);await page.locator('[data-act=closeSettings]').click();await routes(page);await expect(page.locator('.start-route')).toBeVisible();
+});
+
+test('canceling resume cannot carry old stops or dwell into another journey; dwell can be ended explicitly',async({page})=>{
+ await setup(page);const p=multi[0].stops[0];await page.evaluate(p=>{__yolcu.store.activeNav={dest:{name:'Bornova',lat:38.4599,lon:27.2215},stops:[{...p,dwellMinutes:10}],activeDwell:{lon:p.lon,lat:p.lat,until:Date.now()+600000},t:Date.now()};},p);
+ await page.locator('[data-act=openSettings]').click();await page.locator('[data-act=closeSettings]').click();let release;const gate=new Promise(r=>release=r);let hold=true;
+ await page.route('**/valhalla1.openstreetmap.de/route',async r=>{if(hold)await gate;try{await r.fallback();}catch{}});
+ await page.locator('[data-act=resumeNav]').click();await page.locator('[data-act=closeRoutes]').click();hold=false;release();await routes(page);await page.locator('[data-act=preview]').click();await page.waitForFunction(()=>__yolcu.S.sim);await page.evaluate(()=>__yolcu.S.sim.pause());
+ expect(await page.evaluate(()=>({stops:__yolcu.S.stops.length,dwell:__yolcu.S.activeDwell}))).toEqual({stops:0,dwell:null});
+ await page.evaluate(()=>{const {S}=__yolcu;S.activeDwell={lon:S.pos.lon,lat:S.pos.lat,until:Date.now()+600000};__yolcu.navTick(S.pos);});expect(await page.evaluate(()=>__yolcu.S.timing.dwellSeconds)).toBeGreaterThan(590);
+ await page.locator('[data-act=toggleNavMenu]').click();await page.locator('[data-act=finishDwell]').click();expect(await page.evaluate(()=>__yolcu.S.activeDwell)).toBeNull();expect(await page.evaluate(()=>__yolcu.S.timing.dwellSeconds)).toBe(0);
+});
+
+test('adding a pinned place from personal places returns to its calling settings section',async({page})=>{
+ await setup(page);const p=multi[0].stops[0];await page.route('**/photon.komoot.io/**',r=>r.fulfill({json:{features:[{geometry:{coordinates:[p.lon,p.lat]},properties:{name:p.name,osm_key:'amenity',osm_value:'fuel'}}]}}));
+ await page.locator('[data-act=openSettings]').click();await page.locator('[data-act=openSettingsSection][data-section=journey]').click();await page.locator('#settings [data-act=personalPlaces]').click();await page.locator('[data-rs=editPinned][data-id=home]').click();await page.locator('#q').fill(p.name);await page.locator('[data-act=pick]').first().click();await expect(page.locator('#roadside')).toBeVisible();await expect(page.locator('[data-rs=goPinned][data-id=home]')).toContainText(p.name);await page.locator('[data-rs=back]').click();await expect(page.locator('#settings')).toBeVisible();await expect(page.locator('.page-head h1')).toHaveText('Yerlerim ve yolculuk');
+});
+
+test('terrain detail is optional and independent from 3D buildings',async({page})=>{
+ const errors=await setup(page);expect(await page.evaluate(()=>__yolcu.S.map.getTerrain())).toBeNull();
+ await page.locator('[data-act=openLayers]').click();await page.locator('[data-pref=relief]').check();expect(await page.evaluate(()=>__yolcu.store.prefs.relief)).toBe(true);expect(await page.evaluate(()=>__yolcu.S.map.getLayoutProperty('yolcu-hillshade','visibility'))).toBe('visible');
+ await page.locator('[data-act=closeLayers]').click();await page.locator('[data-act=toggle3d]').click();expect(await page.evaluate(()=>__yolcu.S.map.getTerrain()?.source)).toBe('dem3d');await page.locator('[data-act=openLayers]').click();await page.locator('[data-pref=relief]').uncheck();expect(await page.evaluate(()=>__yolcu.S.map.getTerrain())).toBeNull();expect(await page.evaluate(()=>__yolcu.store.prefs.tilt)).toBe(true);expect(errors).toEqual([]);
+});
+
+test('real candidate pins appear before route timing and back preserves an ongoing calculation and dwell',async({page})=>{
+ await setup(page);await page.route('**/*overpass*/**',r=>r.fulfill({json:{elements:multi[0].stops.map(p=>({lat:p.lat,lon:p.lon,tags:{name:p.name,amenity:'fuel'}}))}}));await routes(page);await page.locator('[data-act=preview]').click();await page.waitForFunction(()=>__yolcu.S.sim);await page.evaluate(()=>{const {S,roadside}=__yolcu;S.sim.pause();setInterval(()=>__yolcu.onPos({...S.pos,speed:0,t:Date.now()}),500);const original=roadside.planner;let release;const gate=new Promise(r=>release=r);window.releaseStopPlanning=release;roadside.planner=async(...args)=>{await gate;return original(...args);};});
+ await page.locator('#nav-bottom [data-act=openRoadside]').click();await page.locator('[data-rs=category][data-id=fuel]').click();await expect(page.locator('.rs-map-pin').first()).toBeAttached();await expect(page.locator('.rs-summary')).not.toHaveCount(0);await page.locator('[data-rs=detail]').first().click();await expect(page.locator('.stop-choice')).toBeDisabled();await page.locator('#stop-dwell').fill('10');await page.locator('[data-rs=back]').click();await page.locator('[data-rs=detail]').first().click();await expect(page.locator('#stop-dwell')).toHaveValue('10');await page.evaluate(()=>window.releaseStopPlanning());await expect(page.locator('.stop-choice')).toBeEnabled({timeout:25000});await expect(page.locator('#stop-dwell')).toHaveValue('10');await expect(page.locator('#rs-impact')).not.toContainText('NaN');await expect(page.locator('#nav')).toBeVisible();
 });

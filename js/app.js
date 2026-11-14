@@ -1,4 +1,4 @@
-import {navigationTiming,routeSeconds,timingEvidence} from './timing.js';
+import {navigationTiming,routeSeconds,timingEvidence,hasFreshTraffic} from './timing.js';
 import { store, save, addRecent, isSaved, toggleSaved, exportBackup, importBackup, packForLink, unpackFromLink, addTrip, toggleRouteSaved } from './store.js';
 import { remainingDwellSeconds } from './stops.js';
 import { Roadside } from './roadside.js';
@@ -40,7 +40,7 @@ const fixes = new FixStream(), diagnostics = new Diagnostics(), camera = new Fol
 const key = () => S.services?.traffic?'server':null;
 function tripContext(){const route=S.navRoute||S.routes[S.sel];if(!route||!S.pos||Date.now()-S.pos.t>5000)return null;return {route,along:S.nav?.along||0,from:{...S.pos},to:S.dest,prefs:{...store.prefs},avoids:[...structuredClone(store.avoids),...(S.tripAvoids||[])],stops:structuredClone(S.stops||route.stops||[]),traffic:trafficProvider(),manualOrder:!!S.stopOrderManual,activeDwellSeconds:remainingDwellSeconds([],S.activeDwell)};}
 let roadsideMarkers=[];
-const roadside=new Roadside({store,save,planner:api.planRoutes,canPark:()=>!S.sim||PREVIEW,position:()=>PREVIEW&&S.pos?Promise.resolve({...S.pos,t:Date.now()}):freshPosition(),context:()=>S.nav?tripContext():null,hasTrip:()=>!!S.nav,toast,
+const roadside=new Roadside({store,save,planner:api.planRoutes,canPark:()=>!S.sim||PREVIEW,position:()=>PREVIEW&&S.pos?Promise.resolve({...S.pos,t:Date.now()}):freshPosition(),context:()=>S.nav?tripContext():null,hasTrip:()=>!!S.nav,getStops:()=>structuredClone(S.stops||[]),toast,
  findNearby:async(cat,point,signal)=>{if(key()){try{const found=await traffic.poiSearch(key(),cat,point,signal);if(found.length)return found;}catch(e){if(e.name==='AbortError')throw e;}}const list=await api.nearby({...cat,r:3500,fallback:cat.label},point,signal);return cat.brand?list.filter(p=>(p.name+' '+p.brand).toLocaleLowerCase('tr-TR').includes(cat.brand.toLocaleLowerCase('tr-TR'))):list;},
  onResults:(options,selected)=>{
   roadsideMarkers.forEach(m=>m.remove());roadsideMarkers=[];
@@ -53,6 +53,7 @@ const roadside=new Roadside({store,save,planner:api.planRoutes,canPark:()=>!S.si
   });
  },
  onFocus:p=>{if(!p||!S.mapReady)return;if(S.nav)S.follow=false;S.map.easeTo({center:[p.lon,p.lat],zoom:16,padding:{top:S.nav?160:30,bottom:$('roadside').getBoundingClientRect().height+30,left:24,right:24},duration:500});},
+ isSaved,onEditPinned:id=>{const origin=S.sideReturnSettings;roadside.close();S.pickPlacesReturnSettings=origin;S.pickFor=id;S.pickReturnPlaces=true;openSearch();},
  savePlace:p=>{if(!isSaved(p))toggleSaved(p);},
  onPickEntrance:p=>{if(S.nav)return toast('Araç girişi kaydetmek için sürüşü bitir');S.entranceGoal={...p};roadside.close();goHome();sheet.set('peek');S.map?.easeTo({center:[p.lon,p.lat],zoom:17,pitch:0,duration:700});toast('Haritada araç girişine basılı tut, ardından Giriş olarak kaydet seç',6000);},
  onDismiss:back=>{const settings=S.sideReturnSettings;S.sideReturnSettings=false;if(back&&settings)ACT.openSettings();},
@@ -132,10 +133,10 @@ function applyTheme() {
   const t = theme();
   document.documentElement.dataset.map = t;
   if (!S.mapReady) return;
-  applyPalette(S.map, PALETTES[t], { type: S.nav ? 'standard' : store.prefs.mapType, nav: !!S.nav });
+  applyPalette(S.map, PALETTES[t], { type: S.nav ? 'standard' : store.prefs.mapType, nav: !!S.nav, relief:!!store.prefs.relief });
   // 3B arazi sadece gezinirken: navigasyonda MapLibre 4 kamerayı deniz seviyesine göre hesapladığından
   // konum oku arazinin üstünde kayıyor; ayrıca iPhone'da navigasyon daha akıcı oluyor.
-  setTerrain(S.map, !!(store.prefs.tilt && !S.nav));
+  setTerrain(S.map, !!(store.prefs.relief && store.prefs.tilt && !S.nav));
   setFlow();
   setRouteBuildings(S.map,S.navRoute,S.nav?.along||0,diagnostics.quality);
 }
@@ -193,7 +194,7 @@ const sheet = {
       const hasTrips=store.trips.length>0;
       const recent=this.body.querySelector('[data-act=recent]');
       const needed=recent?recent.getBoundingClientRect().bottom-this.el.getBoundingClientRect().top+12:0;
-      const card=this.body.querySelector('.home-discover');const essential=card?card.getBoundingClientRect().bottom-this.el.getBoundingClientRect().top+16:300;return {peek:Math.min(essential+safeB(),H*.55),half:Math.min(Math.max(essential+100,hasTrips?430:360,needed)+safeB(),H*.72),full:H};
+      const card=this.body.querySelector('.home-discover');const essential=card?card.getBoundingClientRect().bottom-this.el.getBoundingClientRect().top+16:300;return {peek:Math.min(essential+safeB(),H*.55),half:Math.min(Math.max(essential+((hasTrips||store.recents.length||store.places.length||store.savedRoutes.length)?100:0),needed)+safeB(),H*.72),full:H};
     }
     if(S.view==='place'){const last=this.body.lastElementChild;const content=last?last.getBoundingClientRect().bottom-this.el.getBoundingClientRect().top+16:260;return {peek:Math.min(this.peekH(),H),half:Math.min(content+safeB(),H*.7),full:H};}
     if (S.view === 'routes') {
@@ -517,6 +518,7 @@ async function loadIncidents(force = false) {
 }
 
 function showIncident(inc) {
+  rememberScreen();
   S.incident = inc; S.view = 'incident';
   render(); sheet.set('half');
   S.map?.easeTo({ center: inc.point, zoom: Math.max(S.map.getZoom(), 15), padding: camPadding(), duration: 600 });
@@ -632,6 +634,7 @@ async function etaTo(k) {
   let r;
   if (key()) { try { r = await traffic.quickEta(key(), p, dst); } catch { } }
   if (!r) { try { const v = await api.quickRoute(p, dst, store.prefs); r = { time: v.time, delay: null, lengthM: v.lengthM }; } catch { return null; } }
+  if(!Number.isFinite(r.time)||r.time<0)return null;
   S.eta[k] = { ...r, at: Date.now(), lon: p.lon, lat: p.lat };
   return S.eta[k];
 }
@@ -799,8 +802,8 @@ function viewHome() {
     <div class="home-discover"><button data-act="openRoadside"><span class="discover-icon">${I.route}</span><span><b>Yakında bul</b><small>Yakıt, eczane, market ve daha fazlası</small></span>${I.chevron}</button><button data-act="personalPlaces"><span class="discover-icon">${I.star}</span><span><b>Benim yerlerim</b><small>${store.places.length?store.places.length+' kayıtlı yer':'Sana ait duraklar'}</small></span>${I.chevron}</button></div>
     ${store.savedRoutes.length ? `<div class="section"><div class="section-head"><h3>Favori güzergâhlar</h3></div><div class="list">${tripRows(store.savedRoutes, 'openSavedRoute')}</div></div>` : ''}
     ${store.places.length ? `<div class="section"><div class="section-head"><h3>Kayıtlı yerler</h3></div><div class="list">${store.places.map((p, i) => placeRow(p, 'favPlace', i)).join('')}</div></div>` : ''}
-    <div class="section"><div class="section-head"><h3>Son aramalar</h3>${store.recents.length ? '<button class="link small" data-act="clearRecents">Temizle</button>' : ''}</div><div class="list">${store.recents.length ? store.recents.map((p, i) => placeRow(p, 'recent', i, 'recent')).join('') : '<div class="empty">Aradığın yerler burada görünecek.</div>'}</div></div>
-    <button class="row" data-act="avoidList">${placeIcon('road')}<span class="row-main"><span class="row-title">Kaçındığım yollar</span><span class="row-sub">${store.avoids.length} kayıt · haritada basılı tutarak ekle</span></span>${I.chevron}</button>
+    ${store.recents.length?`<div class="section"><div class="section-head"><h3>Son aramalar</h3>${store.recents.length ? '<button class="link small" data-act="clearRecents">Temizle</button>' : ''}</div><div class="list">${store.recents.length ? store.recents.map((p, i) => placeRow(p, 'recent', i, 'recent')).join('') : '<div class="empty">Aradığın yerler burada görünecek.</div>'}</div></div>`: ''}
+    ${store.avoids.length?`<button class="row" data-act="avoidList">${placeIcon('road')}<span class="row-main"><span class="row-title">Kaçındığım yollar</span><span class="row-sub">${store.avoids.length} kayıt · haritada basılı tutarak ekle</span></span>${I.chevron}</button>`: ''}
     <p class="legal">© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> · OpenFreeMap · Mapterhorn · Esri · Valhalla${key() ? ' · TomTom' : ''}</p>`;
 }
 function viewHistory() {
@@ -877,7 +880,7 @@ function viewIncident() {
     <div class="card-head">
       <div><p class="eyebrow" style="color:${incColor(i)}">${esc(i.label)}</p><h2>${esc(i.desc)}</h2>
       <p class="sub">${esc([i.road, i.from && i.to ? `${i.from} → ${i.to}` : i.from].filter(Boolean).join(' · '))}</p></div>
-      <button class="close" data-act="goHome" aria-label="Kapat">${I.x}</button>
+      <button class="close" data-act="backScreen" aria-label="Geri">${I.x}</button>
     </div>
     <div class="stats-grid" data-peek>
       <div class="stat-card"><small>Gecikme</small><b>${d >= 1 ? d : '—'}<span>${d >= 1 ? 'dk' : ''}</span></b></div>
@@ -886,7 +889,7 @@ function viewIncident() {
     <p class="legal" style="text-align:left;margin-top:6px">Kaynak: TomTom canlı trafik</p>`;
 }
 
-const rtime = r => routeSeconds(r);
+const rtime = r => routeSeconds(r)+remainingDwellSeconds(r.stops||[],S.resumeDwell||null);
 function fmtTime(sec) {
   const min = Math.max(1, Math.round(sec / 60));
   if (min < 60) return `${min}<small> dk</small>`;
@@ -906,7 +909,7 @@ function alongOf(r, pt) {
   return best.d < 120 ? best.a : null;
 }
 function routeStrip(r) {
-  if (r._strip != null) return r._strip;
+
   const L = r.lengthM || 1;
   const seg = (a, b, cls) => `<i class="${cls}" style="left:${(a / L * 100).toFixed(2)}%;width:${Math.max(0.8, (b - a) / L * 100).toFixed(2)}%"></i>`;
   let html = '';
@@ -914,7 +917,7 @@ function routeStrip(r) {
     if (s.kind !== 'road' || !['motorway', 'trunk', 'primary', 'secondary'].includes(s.cls)) continue;
     html += seg(r.cum[Math.min(s.b, r.cum.length - 1)], r.cum[Math.min(s.e, r.cum.length - 1)], 'main');
   }
-  for (const j of r.jams || []) {
+  for (const j of hasFreshTraffic(r)?(r.jams||[]):[]) {
     const a = alongOf(r, j.coords[0]), b = alongOf(r, j.coords[j.coords.length - 1]);
     if (a == null || b == null || b <= a) continue;
     html += seg(a, b, j.mag >= 2 ? 'jam' : 'slow');
@@ -927,7 +930,7 @@ function routeNotes(r) {
   const n = [];
   if (r.best) n.push(['Önerilen', 'best']);
   const a = r.stats;
-  const d = Math.round((r.trafficDelay || 0) / 60);
+  const d = hasFreshTraffic(r)?Math.round((r.trafficDelay || 0) / 60):0;
   if (r.trafficDelay != null && d >= 2) n.push([`Trafik +${d} dk`, d >= 6 ? 'bad' : 'warn']);
   else if (a && a.steep >= 300) n.push(['Yokuşlu', 'warn']);
   else if (a && a.rough >= 400) n.push(['Bozuk yol', 'warn']);
@@ -940,7 +943,7 @@ function metricsHtml(r) {
   const dist = v => G.fmtDist(v);
   const cells = [];
   if (r.mode === 'auto') {
-    const d = r.trafficDelay;
+    const d = hasFreshTraffic(r)?r.trafficDelay:null;
     cells.push(m('Trafik', d == null ? '—' : d >= 120 ? `+${Math.round(d / 60)} dk` : 'Akıcı', d >= 360 ? 'bad' : d >= 120 ? 'warn' : 'good'));
   }
   cells.push(m('Yokuş', !a.total || a.gradeKnown < a.total * .95 ? 'Bilinmiyor' : a.steep < 150 ? 'Az / kayıt yok' : dist(a.steep), a.steep >= 600 ? 'bad' : a.steep >= 150 ? 'warn' : 'good'));
@@ -974,7 +977,7 @@ function storyHtml(r) {
 }
 
 function trafficCaption(r) {
-  if (r.trafficCheckedAt) {
+  if (hasFreshTraffic(r)) {
     const delay = Math.round((r.trafficDelay || 0) / 60);
     const when = G.fmtClock(new Date(r.trafficCheckedAt));
     return `<div class="traffic-caption"><i></i>Canlı trafik${delay >= 1 ? ` · +${delay} dk` : ''} · ${when}</div>`;
@@ -1012,7 +1015,7 @@ function viewWhere() {
   return `
     <div class="card-head">
       <div><p class="eyebrow">Şu an buradasın</p><h2>${esc(r.road || r.hood || 'Konum alınıyor…')}</h2>${area ? `<p class="sub">${esc(area)}</p>` : ''}</div>
-      <button class="close" data-act="goHome" aria-label="Kapat">${I.x}</button>
+      <button class="close" data-act="backScreen" aria-label="Geri">${I.x}</button>
     </div>
     <div class="stats-grid" data-peek>
       <div class="stat-card"><small>Hız</small><b>${kmh}<span>km/sa</span></b></div>
@@ -1049,6 +1052,7 @@ function rememberScreen(){
  if(screenHistory.length>20)screenHistory.shift();
 }
 function backScreen(){
+ if(S.view==='routes'&&!S.nav){S.resumeStops=null;S.resumeDwell=null;S.resumeAvoids=null;S.resumeWalkGoal=null;S.autoStart=false;}
  S.planAbort?.abort();S.searchAbort?.abort();clearTimeout(S.searchT);S.catToken={};
  const previous=screenHistory.pop();if(!previous)return goHome();
  Object.assign(S,previous.values);sheet.body.innerHTML='';render();sheet.set(previous.detent);sheet.body.scrollTop=previous.scroll;
@@ -1058,6 +1062,7 @@ function backScreen(){
 }
 function bindSearch(){const q=$('q');if(!q)return;q.addEventListener('input',()=>onSearchInput(q.value));q.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();q.blur();onSearchInput(q.value,true);}});}
 function goHome() {
+  S.resumeStops=null;S.resumeDwell=null;S.resumeAvoids=null;S.resumeWalkGoal=null;S.autoStart=false;
   screenHistory.length=0;S.searchAbort?.abort();clearTimeout(S.searchT);S.catToken={};
   S.view = 'home'; S.place = null; S.pickFor = null; S.results = null; S.incident = null;
   S.planAbort?.abort();
@@ -1116,7 +1121,7 @@ function choosePlace(p) {
     save();
     S.helloAt = null; S.eta = {};
     toast(S.pickFor === 'home' ? 'Ev kaydedildi' : 'İş kaydedildi');
-    goHome();if(S.pickReturnSettings){S.pickReturnSettings=false;ACT.openSettings();}
+    goHome();if(S.pickReturnPlaces){S.pickReturnPlaces=false;S.sideReturnSettings=!!S.pickPlacesReturnSettings;S.pickPlacesReturnSettings=false;roadside.places();}if(S.pickReturnSettings){S.pickReturnSettings=false;ACT.openSettings();}
     return;
   }
   if (S.pickFor === 'place') {
@@ -1496,7 +1501,7 @@ function saveActiveNav(){if(!S.nav||S.sim)return;store.activeNav={dest:S.dest,st
 function renderUncertain(st){
   S.bannerFor=null;$('nav-icon').innerHTML=I.locLine;$('nav-dist').textContent=st.offRoute?'Rota dışında':'Konum doğrulanıyor';$('nav-action').textContent=st.offRoute?'Yeni güzergâh aranıyor':'GPS ölçümü bekleniyor';$('nav-road').textContent='';$('nav-then').hidden=true;setArrowData([]);S.arrowFor=-1;
 }
-function adaptQuality(level){if(S.mapReady)setRouteBuildings(S.map,S.navRoute,S.nav?.along||0,level);}
+function adaptQuality(level){if(S.mapReady){setRouteBuildings(S.map,S.navRoute,S.nav?.along||0,level);if(S.nav&&S.map.getLayer('yolcu-hillshade'))S.map.setLayoutProperty('yolcu-hillshade','visibility','none');}}
 function navHealth(){
   if(!S.nav)return;
   const quality=fixes.status(),reason=!navigator.onLine?'İnternet bağlantısı bekleniyor':quality||(S.rerouting?'Rota yenileniyor':S.replanMessage||'');
@@ -1626,6 +1631,7 @@ function renderNavMenu() {
       <button class="row" data-act="overview"><span class="row-icon">${I.route}</span><span class="row-main"><span class="row-title">Tüm rotayı gör</span></span></button>
       <button class="row" data-act="avoidNextTurn">${placeIcon('road')}<span class="row-main"><span class="row-title">Bu dönüşü istemiyorum</span></span></button>
       <button class="row" data-act="openPark">${placeIcon('parking')}<span class="row-main"><span class="row-title">${S.lastState?.remM<1000?'Hedef yakınında park':'Park & araç'}</span></span></button>
+      ${S.activeDwell&&S.activeDwell.until>Date.now()?`<button class="row" data-act="finishDwell">${placeIcon('recent')}<span class="row-main"><span class="row-title">Duraklamayı bitir</span><span class="row-sub">Bekleme süresini kalan yolculuktan çıkar</span></span></button>`:''}
       ${(S.stops||[]).map((stop,i)=>`<button class="row" data-act="removeStop" data-i="${i}">${placeIcon(stop.kind)}<span class="row-main"><span class="row-title">${esc(stop.name)}</span><span class="row-sub">Ara durağı kaldır</span></span></button>`).join('')}
       <button class="row" data-act="navTilt">${placeIcon('road')}<span class="row-main"><span class="row-title">${store.prefs.tilt?'2D harita':'3D harita'}</span></span></button>
       ${soundControls()}
@@ -1645,29 +1651,49 @@ function renderLayers() {
       <button class="mt ${P.mapType === 'satellite' ? 'on' : ''}" data-act="mapType" data-v="satellite"><span class="mt-img sat"></span><span>Uydu</span></button>
     </div>
     <div class="list plain">
-      <label class="row"><span class="row-main"><span class="row-title">Trafik</span><span class="row-sub">${key() ? 'Yavaş ve sıkışık yollar, kazalar' : 'Önce Ayarlar’dan TomTom’u bağla'}</span></span><input type="checkbox" class="switch" data-pref="traffic" ${P.traffic && key() ? 'checked' : ''} ${key() ? '' : 'disabled'}></label>
+<label class="row"><span class="row-main"><span class="row-title">Arazi ve gölgeler</span><span class="row-sub">Binalardan bağımsız yeryüzü ayrıntıları</span></span><input type="checkbox" class="switch" data-pref="relief" ${P.relief?'checked':''}></label>
+      <label class="row"><span class="row-main"><span class="row-title">Trafik</span><span class="row-sub">${key() ? 'Yavaş ve sıkışık yollar, kazalar' : 'Güvenli trafik sunucusu bağlantısı bekleniyor'}</span></span><input type="checkbox" class="switch" data-pref="traffic" ${P.traffic && key() ? 'checked' : ''} ${key() ? '' : 'disabled'}></label>
       <label class="row"><span class="row-main"><span class="row-title">Radarlar</span><span class="row-sub">EDS ve hız kameraları</span></span><input type="checkbox" class="switch" data-pref="radar" ${P.radar ? 'checked' : ''}></label>
     </div>`;
 }
 
 /* ================= Ayarlar ================= */
+const SETTINGS_SECTIONS={
+ appearance:{title:'Harita ve görünüm',icon:'layers',groups:['Harita teması','Uygulama simgesi'],sub:'Tema, harita ve uygulama simgesi'},
+ sound:{title:'Ses ve radar',icon:'speaker',groups:['Ses','Radar','Elle işaretlenmiş radarlar'],sub:'Sessizlik, yönlendirme ve uyarılar'},
+ routing:{title:'Rota tercihleri',icon:'road',groups:['Rota tercihleri'],sub:'Ana yollar, eğim, yüzey ve ücretler'},
+ journey:{title:'Yerlerim ve yolculuk',icon:'star',groups:['Ev ve iş','Yol üstü & kişisel yardım','Benim yerlerim','Kaçındığın yollar'],sub:'Ev, iş, duraklar ve hatırlatmalar'},
+ connections:{title:'Trafik bağlantısı',icon:'route',groups:['Trafik ve işletmeler'],sub:'Sunucuda tutulan servis bağlantısı'},
+ privacy:{title:'Verilerim ve uygulama',icon:'download',groups:['Yedek','Hakkında'],sub:'Yedekleme, kaynaklar ve sürüm'}
+};
+function arrangeSettings(){
+ const body=$('settings-body'),groups=[];let current;
+ for(const node of [...body.children]){if(node.classList.contains('group-title')){current={title:node.textContent,nodes:[]};groups.push(current);}current?.nodes.push(node);}
+ const section=SETTINGS_SECTIONS[S.settingsSection];
+ if(section){body.replaceChildren(...groups.filter(g=>section.groups.includes(g.title)).flatMap(g=>g.nodes));$('settings').querySelector('.page-head h1').textContent=section.title;$('settings').querySelector('[data-act=closeSettings]').textContent='Geri';return;}
+ const rows=Object.entries(SETTINGS_SECTIONS).map(([id,c])=>`<button class="row" data-act="openSettingsSection" data-section="${id}"><span class="row-icon">${I[c.icon]}</span><span class="row-main"><span class="row-title">${c.title}</span><span class="row-sub">${c.sub}</span></span>${I.chevron}</button>`).join('');
+ const theme=groups.find(g=>g.title==='Harita teması');
+ body.innerHTML=`<div class="settings-overview"><p class="eyebrow">Yolcu</p><h2>Yolculuğun sana göre.</h2></div><div id="quick-theme"></div><div class="list settings-menu">${rows}</div><div class="group-title">Yolculuk asistanı</div><div class="list"><button class="row" data-act="openModels"><span class="row-icon">${I.star}</span><span class="row-main"><span class="row-title">Yapay zekâ ve modeller</span><span class="row-sub">Hesabındaki modeller · güvenli bağlantı</span></span>${I.chevron}</button></div><div class="group-title">Hızlı ses seçimi</div><div class="list plain">${soundControls()}</div>`;
+ if(theme)$('quick-theme').append(...theme.nodes);
+}
+
 function modelRows(data,query=''){
- const list=(data?.models||[]).filter(m=>(m.id+' '+m.label).toLocaleLowerCase('tr-TR').includes(query.toLocaleLowerCase('tr-TR')));
+ const list=(data?.models||[]).filter(m=>(m.id+' '+m.label).toLocaleLowerCase('tr-TR').includes(query.toLocaleLowerCase('tr-TR'))).sort((a,b)=>Number(b.id===data.model)-Number(a.id===data.model));
  return list.map(m=>`<button class="model-option" role="radio" aria-checked="${m.id===data.model}" data-act="chooseModel" data-model="${esc(m.id)}" ${data.modelLocked||S.modelSaving?'disabled':''}><span class="model-mark">${m.id===data.model?I.check:''}</span><span><b>${esc(m.label||m.id)}</b>${m.label&&m.label!==m.id?`<small>${esc(m.id)}</small>`:''}</span>${m.id===data.model?'<em>Seçili</em>':''}</button>`).join('')||'<p class="model-empty">Bu aramaya uyan model yok.</p>';
 }
 function renderModels(){
  if(S.settingsSection!=='models')return;
  $('settings').querySelector('.page-head h1').textContent='Yolculuk asistanı';$('settings').querySelector('[data-act=closeSettings]').textContent='Geri';
  const data=S.aiCatalog,locked=data?.modelLocked;
- $('settings-body').innerHTML=`<div class="settings-intro"><span class="assistant-emblem">${I.star}</span><p class="eyebrow">YapayZekaLab</p><h2>İsteğini anlasın.<br>Kararı sen ver.</h2><p>Yalnız yazdığın istek çözümlenir. Konum akışın paylaşılmaz; model kullanılamasa da yol tarifi ve ihtiyaç araması devam eder.</p></div><div class="model-status" role="status">${S.modelsLoading?'Hesabındaki modeller yükleniyor…':S.modelError?esc(S.modelError):data?.models?.length?`${data.models.length} kullanılabilir model${locked?' · sunucudan yönetiliyor':''}`:'Henüz model listesi alınmadı.'}</div>${locked?'<p class="model-notice">Model sunucu ayarıyla sabitlenmiş. Uygulamadan değiştirmek için sunucu yöneticisinin AI_MODEL sabitlemesini kaldırması gerekiyor.</p>':''}${data?.models?.length?`<label class="model-search">${I.search}<input id="model-query" type="search" placeholder="Modellerde ara" aria-label="Modellerde ara"></label><div id="model-options" class="model-options" role="radiogroup" aria-label="Hesabındaki modeller">${modelRows(data)}</div>`:''}<button class="btn secondary" data-act="refreshModels" ${S.modelsLoading||!hasServerAPI()?'disabled':''}>${I.refresh||I.route} Listeyi yenile</button><details class="model-details"><summary>Bağlantı ve gizlilik</summary><p>Anahtar bu uygulamaya veya yedeğine konmaz; sunucuda tutulur. GitHub Pages üzerinde sunucu özellikleri ayrıca yayımlanmış bir backend gerektirir.</p></details>`;
+ $('settings-body').innerHTML=`<div class="settings-intro"><span class="assistant-emblem">${I.star}</span><p class="eyebrow">YapayZekaLab</p><h2>İsteğini anlasın.<br>Kararı sen ver.</h2><p>Yalnız yazdığın istek çözümlenir. Konum akışın paylaşılmaz; model kullanılamasa da yol tarifi ve ihtiyaç araması devam eder.</p></div><div class="model-status" role="status">${S.modelsLoading?'Hesabındaki modeller yükleniyor…':S.modelError?esc(S.modelError):data?.models?.length?`${data.models.length} kullanılabilir model${locked?' · sunucudan yönetiliyor':''}`:data?.models?'Bu hesapta model listelenmiyor.':'Henüz model listesi alınmadı.'}</div>${locked?'<p class="model-notice">Model sunucu ayarıyla sabitlenmiş. Uygulamadan değiştirmek için sunucu yöneticisinin AI_MODEL sabitlemesini kaldırması gerekiyor.</p>':''}${data?.models?.length?`<label class="model-search">${I.search}<input id="model-query" type="search" placeholder="Modellerde ara" aria-label="Modellerde ara"></label><div id="model-options" class="model-options" role="radiogroup" aria-label="Hesabındaki modeller">${modelRows(data)}</div>`:''}<button class="btn secondary" data-act="refreshModels" ${S.modelsLoading||!hasServerAPI()?'disabled':''}>${I.refresh||I.route} Listeyi yenile</button><details class="model-details"><summary>Bağlantı ve gizlilik</summary><p>Anahtar bu uygulamaya veya yedeğine konmaz; sunucuda tutulur. GitHub Pages üzerinde sunucu özellikleri ayrıca yayımlanmış bir backend gerektirir.</p></details>`;
  $('model-query')?.addEventListener('input',e=>{$('model-options').innerHTML=modelRows(S.aiCatalog,e.target.value);});
  $('settings-body').scrollTop=0;
 }
 async function loadModels(){
- const version=S.modelsVersion=(S.modelsVersion||0)+1;S.modelError=null;S.modelsLoading=true;
+ S.modelsController?.abort();const ac=S.modelsController=new AbortController();const version=S.modelsVersion=(S.modelsVersion||0)+1;S.modelError=null;S.modelsLoading=true;
  if(!hasServerAPI()){S.modelsLoading=false;S.modelError='Bu statik yayında model sunucusu bağlı değil. Normal arama ve yol tarifi kullanılabilir.';renderModels();return;}
  renderModels();
- try{const r=await fetch('/api/ai/models',{signal:AbortSignal.timeout(15000)});const data=await r.json();if(!r.ok)throw new Error(data.error||'Model listesi alınamadı');if(version!==S.modelsVersion)return;S.aiCatalog=data;}
+ try{const r=await fetch('/api/ai/models',{signal:AbortSignal.any([ac.signal,AbortSignal.timeout(15000)])});if(!r.headers.get('content-type')?.includes('application/json'))throw new Error('Bu yayında model sunucusu bağlı değil. Normal arama ve yol tarifi kullanılabilir.');const data=await r.json();if(!r.ok)throw new Error(data.error||'Model listesi alınamadı');if(version!==S.modelsVersion)return;S.aiCatalog=data;}
  catch(e){if(version!==S.modelsVersion)return;S.aiCatalog=null;S.modelError=e.name==='TimeoutError'?'Bağlantı zaman aşımına uğradı. Yeniden deneyebilirsin.':e.message;}
  finally{if(version===S.modelsVersion){S.modelsLoading=false;renderModels();}}
 }
@@ -1697,7 +1723,7 @@ function renderSettings() {
     <p class="group-foot">Sessiz modda ses sistemi başlatılmaz. Sesli modlarda kısa anonslar diğer seslerle karışacak şekilde istenir; son davranış iOS ve Bluetooth aygıtına bağlıdır.</p>
     <div class="group-title">Radar</div><div class="list plain"><label class="row"><span class="row-main"><span class="row-title">Haritada radar uyarıları</span><span class="row-sub">${S.official.length} EDS · ${S.cams.length} çevredeki radar</span></span><input type="checkbox" class="switch" data-pref="radar" ${P.radar ? 'checked' : ''}></label></div>${oldRadars}
 
-    <div class="group-title">Trafik ve işletmeler</div><div class="list plain"><div class="row">${placeIcon('road')}<span class="row-main"><span class="row-title">Güvenli sunucu bağlantısı</span><span class="row-sub wrap">${key()?'Sunucuda yapılandırıldı · servis erişimi istekte doğrulanır':'Temel harita ve rota kullanılabilir. Canlı trafik için sunucu bağlantısı gerekiyor.'}</span></span></div></div>
+    <div class="group-title">Trafik ve işletmeler</div><div class="list plain"><div class="row">${placeIcon('road')}<span class="row-main"><span class="row-title">Güvenli sunucu bağlantısı</span><span class="row-sub wrap">${key()?'Sunucuda yapılandırıldı · servis erişimi istekte doğrulanır':'Temel harita ve rota kullanılabilir. Canlı trafik için sunucu bağlantısı gerekiyor.'}</span></span></div><button class="row" data-act="testTraffic" ${key()?'':'disabled'}>Bağlantıyı doğrula</button></div><p id="traffic-connection-result" class="group-foot" role="status">${esc(S.trafficTest||'')}</p>
 
     <div class="group-title">Uygulama simgesi</div>
     <div class="icon-grid">${icons}</div>
@@ -1729,6 +1755,7 @@ function renderSettings() {
     <div class="group-title">Hakkında</div>
     <div class="list plain"><div class="row"><span class="row-main"><span class="row-title">Yolcu · ${RELEASE}</span><span class="row-sub wrap">Harita © OpenStreetMap katkıcıları, OpenFreeMap. Arazi © Mapterhorn. Uydu © Esri, Maxar. Rota: Valhalla (FOSSGIS). Arama: Photon, Nominatim${key() ? ', TomTom' : ''}. Hava: Open‑Meteo. Radar: EGM EDS Haritası, OpenStreetMap.</span></span></div></div>`;
 
+  arrangeSettings();
 }
 
 function applyIconLink() {
@@ -1739,7 +1766,7 @@ function applyIconLink() {
 function setTilt(on) {
   store.prefs.tilt = on; save();
   if (!S.map) return;
-  setTerrain(S.map, on && !S.nav);
+  setTerrain(S.map, on && store.prefs.relief && !S.nav);
   const z = S.map.getZoom();
   S.map.easeTo({ pitch: on ? 48 : 0, zoom: on ? Math.max(z, 15.8) : z, bearing: on ? S.map.getBearing() : 0, duration: 900 });
 }
@@ -1758,7 +1785,7 @@ const ACT = {
   openRoadside:()=>{S.sideReturnSettings=!$('settings').hidden;closeNavMenu();$('settings').hidden=true;document.body.classList.remove('settings-open');roadside.home();},openPark:()=>{S.sideReturnSettings=!$('settings').hidden;closeNavMenu();$('settings').hidden=true;document.body.classList.remove('settings-open');roadside.park();},avoidNextTurn:()=>avoidNextTurn(),
   personalPlaces:()=>{S.sideReturnSettings=!$('settings').hidden;$('settings').hidden=true;document.body.classList.remove('settings-open');roadside.places();},
   saveEntrance:()=>{const goal=S.entranceGoal;if(!goal||!S.place)return toast('Önce girişin ait olduğu hedefi seç');store.entrances=store.entrances.filter(e=>dist(e.goal.lon,e.goal.lat,goal.lon,goal.lat)>80);store.entrances.push({goal:{...goal},point:{lon:S.place.lon,lat:S.place.lat},note:S.place.name});save();S.entranceGoal=null;render();toast('Araç girişi kaydedildi');},
-  pickEntrance:el=>{const goal=store[el.dataset.v];if(!goal)return toast('Önce bu hedefin konumunu kaydet');ACT.closeSettings();roadside.onPickEntrance(goal);},
+  pickEntrance:el=>{const goal=store[el.dataset.v];if(!goal)return toast('Önce bu hedefin konumunu kaydet');document.body.classList.remove('settings-open');$('settings').hidden=true;roadside.onPickEntrance(goal);},
 
 
 
@@ -1767,9 +1794,11 @@ const ACT = {
   navTilt:()=>{setTilt(!store.prefs.tilt);camera.reset();closeNavMenu();if(S.pos)navTick(S.pos);},
   openModels:()=>{S.settingsSection='models';renderSettings();loadModels();},
   refreshModels:()=>loadModels(),
-  chooseModel:async el=>{if(S.modelSaving)return;S.modelSaving=true;el.disabled=true;try{const r=await fetch('/api/ai/model',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:el.dataset.model}),signal:AbortSignal.timeout(15000)});const data=await r.json();if(!r.ok)throw new Error(data.error||'Model seçilemedi');S.aiCatalog={...S.aiCatalog,model:data.model};roadside.assistant.cancel();roadside.assistant.cache.clear();toast('Model seçildi');}catch(e){toast(e.name==='TimeoutError'?'Model seçimi zaman aşımına uğradı':e.message);}finally{S.modelSaving=false;if(S.settingsSection==='models')renderModels();}},
-  routePrefs: () => { ACT.openSettings(); requestAnimationFrame(() => $('route-preferences')?.scrollIntoView({ block: 'start' })); },
-  avoidList: () => { ACT.openSettings(); requestAnimationFrame(() => $('avoided-roads')?.scrollIntoView({ block: 'start' })); },
+  testTraffic:async el=>{el.disabled=true;const status=$('traffic-connection-result');if(status)status.textContent='Bağlantı doğrulanıyor…';try{await traffic.testKey('server');S.trafficTest='Doğrulandı · arama sağlayıcısı sunucudan yanıt verdi';}catch(e){S.trafficTest=e.message||'Bağlantı doğrulanamadı';}finally{el.disabled=false;if($('traffic-connection-result'))$('traffic-connection-result').textContent=S.trafficTest;}},
+  chooseModel:async el=>{if(S.modelSaving)return;S.modelSaving=true;S.modelError=null;el.disabled=true;try{const r=await fetch('/api/ai/model',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:el.dataset.model}),signal:AbortSignal.timeout(15000)});const data=await r.json();if(!r.ok)throw new Error(data.error||'Model seçilemedi');S.aiCatalog={...S.aiCatalog,model:data.model};roadside.assistant.cancel();roadside.assistant.cache.clear();toast('Model seçildi');}catch(e){S.modelError=e.name==='TimeoutError'?'Model seçimi zaman aşımına uğradı':e.message;toast(S.modelError);}finally{S.modelSaving=false;if(S.settingsSection==='models')renderModels();}},
+  openSettingsSection:el=>{S.settingsSection=el.dataset.section;renderSettings();$('settings-body').scrollTop=0;},
+  routePrefs:()=>{S.settingsSection='routing';ACT.openSettings();},
+  avoidList: () => { S.settingsSection='journey';ACT.openSettings(); requestAnimationFrame(() => $('avoided-roads')?.scrollIntoView({ block: 'start' })); },
   allTrips: () => { S.tripView = null; S.view = 'history'; render(); sheet.set('full'); setRoutesData([]); },
   openTrip: el => openTrip(store.trips[+el.dataset.i]),
   openSavedRoute: el => openTrip(store.savedRoutes[+el.dataset.i]),
@@ -1787,7 +1816,7 @@ const ACT = {
   cycleSheet: () => sheet.set(({ peek: 'half', half: 'full', full: 'peek' })[sheet.detent]),
   openSearch: () => openSearch(),
   backScreen:()=>backScreen(),
-  cancelSearch: () => { document.activeElement?.blur?.(); backScreen();S.pickFor=null;if(S.pickReturnSettings){S.pickReturnSettings=false;ACT.openSettings();} },
+  cancelSearch: () => { document.activeElement?.blur?.(); backScreen();S.pickFor=null;if(S.pickReturnPlaces){S.pickReturnPlaces=false;S.sideReturnSettings=!!S.pickPlacesReturnSettings;S.pickPlacesReturnSettings=false;roadside.places();}if(S.pickReturnSettings){S.pickReturnSettings=false;ACT.openSettings();} },
   pick: el => { const p = Array.isArray(S.results) ? S.results[+el.dataset.i] : null; if (p) choosePlace(p); },
   recent: el => { const p = store.recents[+el.dataset.i]; if (p) showPlace(p); },
   fav: el => {
@@ -1869,6 +1898,7 @@ const ACT = {
   speakStory: () => { const r = S.routes[S.sel]; if (!r?.story) return; if (store.prefs.soundMode !== 'guidance') { toast('Dinlemek için Yönlendirme + uyarılar modunu seç'); return; } voice.say(G.storySpeech(r.story, S.dest.name)); },
   go: el => startNav(+el.dataset.i),
   preview: el => startNav(+el.dataset.i, true),
+  finishDwell:()=>{S.activeDwell=null;saveActiveNav();closeNavMenu();if(S.pos)navTick(S.pos);toast('Duraklama bitirildi');},
   endNav: () => endNav(),
   toggleNavMenu: () => {
     const m = $('nav-menu');
@@ -1921,8 +1951,8 @@ const ACT = {
   },
   dismissResume: (el, e) => { e.stopPropagation(); store.activeNav = null; save(); render(); },
 
-  openSettings: () => { document.body.classList.add('settings-open');renderSettings(); $('settings').hidden = false; $('layers').hidden = true; },
-  closeSettings: () => { if(S.settingsSection==='models'){S.settingsSection=null;S.modelsVersion=(S.modelsVersion||0)+1;renderSettings();return;}document.body.classList.remove('settings-open');$('settings').hidden = true; render(); },
+  openSettings: el => { if(el?.dataset?.act==='openSettings')S.settingsSection=null;document.body.classList.add('settings-open');renderSettings(); $('settings').hidden = false; $('layers').hidden = true; },
+  closeSettings: () => { if(S.settingsSection){S.modelsController?.abort();S.settingsSection=null;S.modelsVersion=(S.modelsVersion||0)+1;renderSettings();return;}document.body.classList.remove('settings-open');$('settings').hidden = true; render(); },
   theme: el => { store.prefs.theme = el.dataset.v; save(); applyTheme(); renderSettings(); },
   pickIcon: el => { store.prefs.icon = el.dataset.v; save(); applyIconLink(); renderSettings(); },
   applyIcon: () => {
@@ -1977,6 +2007,7 @@ document.addEventListener('change', e => {
   store.prefs[k] = k === 'maxExtraMinutes' ? Number(e.target.value) : e.target.checked;
   save();
   if (k === 'traffic') { setFlow(); if (store.prefs.traffic) loadIncidents(true); else { S.incidents = []; drawIncidents(); } }
+  else if (k === 'relief') { applyTheme(); }
   else if (k === 'radar') { if (store.prefs.radar && S.pos) loadRadars(S.pos); drawRadars(); }
   else if (S.view === 'routes' && S.dest && !S.nav) planRoutes();
   if (!$('settings').hidden) renderSettings();
@@ -1994,7 +2025,7 @@ $('file-import').addEventListener('change', async e => {
 function readUrl() {
   const q = new URLSearchParams(location.search);
   if (q.get('icon') && ICONS[q.get('icon')]) { store.prefs.icon = q.get('icon'); save(); }
-  if (q.get('tomtom')) {
+  if (q.has('tomtom')) {
     // Discard legacy credential links without reading their value into app state.
     q.delete('tomtom');
     history.replaceState(null, '', location.pathname + (q.toString() ? '?' + q : '') + location.hash);
@@ -2025,7 +2056,7 @@ function boot() {
   if (PREVIEW) onPos({ lon: 27.1045, lat: 38.3695, acc: 8, speed: 0, heading: null, t: Date.now() });
   else startGeo();
   setInterval(() => {
-    checkTheme();
+    checkTheme();if(S.view==='routes'&&!S.nav){render();setJams(hasFreshTraffic(S.routes[S.sel])?S.routes[S.sel].jams:[]);}
     if (S.view === 'home' && !S.nav) { refreshHello(); if (sheet.detent === 'peek') { const sc = sheet.body.scrollTop; render(); sheet.body.scrollTop = sc; } }
   }, 60000);
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {

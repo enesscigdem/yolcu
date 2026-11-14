@@ -87,7 +87,7 @@ export async function loadStyle() {
   style.sources.sat = { type: 'raster', tiles: [SAT_URL], tileSize: 256, maxzoom: 19, attribution: 'Uydu © Esri, Maxar' };
   const waterIdx = style.layers.findIndex(l => l.id === 'water' || l['source-layer'] === 'water');
   style.layers.splice(waterIdx, 0, {
-    id: 'yolcu-hillshade', type: 'hillshade', source: 'dem', maxzoom: 16,
+    id: 'yolcu-hillshade', type: 'hillshade', source: 'dem', maxzoom: 16, layout:{visibility:'none'},
     paint: { 'hillshade-exaggeration': 0.45, 'hillshade-shadow-color': '#47523F', 'hillshade-highlight-color': '#FFFFFF', 'hillshade-illumination-direction': 315 }
   });
   style.layers.splice(1, 0, { id: 'yolcu-sat', type: 'raster', source: 'sat', layout: { visibility: 'none' }, paint: { 'raster-fade-duration': 150, 'raster-contrast': 0.1, 'raster-saturation': 0.05, 'raster-resampling': 'linear' } });
@@ -184,7 +184,7 @@ export function applyPalette(map, P, opts = {}) {
     }
   }
   vis('yolcu-sat', sat);
-  vis('yolcu-hillshade', !sat);
+  vis('yolcu-hillshade', !sat && !!opts.relief && !nav);
   vis('yolcu-poi', !nav);
   set('yolcu-poi', 'text-color', sat ? '#FFFFFF' : P.poiLabel);
   set('yolcu-poi', 'text-halo-color', sat ? 'rgba(0,0,0,.7)' : P.halo);
@@ -228,10 +228,10 @@ export function setRouteBuildings(map,route,along=0,quality=0) {
     if(layer.type==='fill-extrusion'){
       const h=['max',0,['to-number',['get','render_height'],0]];
       const target=polygons.length?['case',['within',{type:'MultiPolygon',coordinates:polygons}],0,h]:h;
-      const value=quality>=2?0:['interpolate',['linear'],['zoom'],quality?15:14,0,16.2,target];
-      map.setPaintProperty(layer.id,'fill-extrusion-height',value);
+      const value=quality>=1?0:['interpolate',['linear'],['zoom'],quality?15:14,0,16.2,target];
+      if((map.getLayoutProperty(layer.id,'visibility')||'visible')!==(quality>=1?'none':'visible'))map.setLayoutProperty(layer.id,'visibility',quality>=1?'none':'visible');map.setPaintProperty(layer.id,'fill-extrusion-height',value);map.setPaintProperty(layer.id,'fill-extrusion-base',quality>=1?0:['interpolate',['linear'],['zoom'],14,0,16.2,['coalesce',['get','render_min_height'],0]]);
     }
-    if(layer.type==='symbol'&&layer['source-layer']==='place')map.setPaintProperty(layer.id,'text-opacity',route? .45 : 1);
+    if(layer.type==='symbol'&&layer['source-layer']==='place'){if((map.getLayoutProperty(layer.id,'visibility')||'visible')!==(route&&quality>=2?'none':'visible'))map.setLayoutProperty(layer.id,'visibility',route&&quality>=2?'none':'visible');map.setPaintProperty(layer.id,'text-opacity',route? .45 : 1);}
     if(layer.type==='symbol'&&layer['source-layer']==='transportation_name'&&/minor|path/.test(layer.id))map.setPaintProperty(layer.id,'text-opacity',quality? .6:1);
   }
 }

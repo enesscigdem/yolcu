@@ -1,5 +1,5 @@
 import {modelCatalog,trafficProxy,budget} from './services.mjs';
-import http from 'node:http';import fs from 'node:fs/promises';import path from 'node:path';import os from 'node:os';import {timingSafeEqual} from 'node:crypto';import {fileURLToPath} from 'node:url';import {validateIntent} from '../js/needs.js';
+import http from 'node:http';import fs from 'node:fs/promises';import path from 'node:path';import os from 'node:os';import {timingSafeEqual,randomUUID} from 'node:crypto';import {fileURLToPath} from 'node:url';import {validateIntent} from '../js/needs.js';
 const root=path.resolve(fileURLToPath(new URL('..',import.meta.url))),port=Number(process.env.PORT||4173);
 const publicOrigin=process.env.APP_ORIGIN||null;const gatewayToken=process.env.YOLCU_GATEWAY_TOKEN||'';if(publicOrigin&&(!publicOrigin.startsWith('https://')||gatewayToken.length<32))throw new Error('HTTPS APP_ORIGIN ve en az 32 karakter YOLCU_GATEWAY_TOKEN gerekli');
 const preferencePath=()=>process.env.AI_PREFERENCES_PATH||path.join(os.homedir(),'.config/yolcu/ai-preferences.json');
@@ -40,7 +40,7 @@ export async function handle(req,res){
     if(config.modelLocked)return json(res,409,{error:'Model sunucunun AI_MODEL ayarıyla sabitlenmiş. Sunucu yöneticisi bu ayarı kaldırınca uygulamadan seçim yapılabilir.',code:'model_locked'});
     const input=await body(req);if(typeof input.model!=='string'||input.model.length>120)return json(res,400,{error:'Geçersiz model'});
     const models=await modelCatalog(config,signal);if(!models.some(m=>m.id===input.model))return json(res,400,{error:'Model hesabın güncel listesinde yok'});
-    const filename=preferencePath();await fs.mkdir(path.dirname(filename),{recursive:true});const temporary=filename+'.'+process.pid+'.tmp';await fs.writeFile(temporary,JSON.stringify({model:input.model}),{mode:0o600});await fs.rename(temporary,filename);
+    const filename=preferencePath();await fs.mkdir(path.dirname(filename),{recursive:true});const temporary=filename+'.'+randomUUID()+'.tmp';await fs.writeFile(temporary,JSON.stringify({model:input.model}),{mode:0o600});await fs.rename(temporary,filename);
     return json(res,200,{model:input.model,message:'Model seçimi kaydedildi'});
    }
    if(!configured)return json(res,503,{error:providerConfigured?'Önce hesabından bir model seç.':'Yapay zekâ sunucu bağlantısı henüz hazır değil.',code:'missing_configuration'});

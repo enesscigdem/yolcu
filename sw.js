@@ -1,5 +1,5 @@
 // Yolcu service worker: uygulama dosyalarını önbelleğe alır, internet yokken de açılır
-const VERSION = 'yolcu-v12';
+const VERSION = 'yolcu-v13-development';
 const SHELL = [
   './', 'index.html', 'app.css', 'experience.css', 'manifest.webmanifest',
   'js/app.js', 'js/api.js', 'js/geo.js', 'js/guide.js', 'js/icons.js', 'js/mapstyle.js', 'js/nav.js', 'js/store.js',
@@ -9,7 +9,7 @@ const SHELL = [
 const CDN = ['https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js', 'https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css'];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(VERSION).then(c => c.addAll([...SHELL, ...CDN])).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(VERSION).then(c => c.addAll([...SHELL, ...CDN])));
 });
 
 self.addEventListener('activate', e => {
