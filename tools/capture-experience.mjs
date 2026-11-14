@@ -1,0 +1,18 @@
+// Actual application captures with recorded public İzmir routing fixtures. No phone validation.
+import {chromium} from 'playwright';
+import {readFileSync,mkdirSync} from 'node:fs';
+import {setup} from '../tests/browser-helpers.js';
+const label=process.argv[2]||'after',port=process.argv[3]||'4173',out=`artifacts/experience/${label}`;mkdirSync(out,{recursive:true});
+const browser=await chromium.launch({executablePath:process.env.CAPTURE_BROWSER||'/usr/bin/chromium'});
+try {
+ const context=await browser.newContext({baseURL:`http://127.0.0.1:${port}`,viewport:{width:440,height:956},isMobile:true,hasTouch:true,permissions:['geolocation'],geolocation:{longitude:27.1045,latitude:38.3695,accuracy:8},serviceWorkers:'block'});
+ const page=await context.newPage();await page.addInitScript(()=>{if(!localStorage.getItem('yolcu.v1'))localStorage.setItem('yolcu.v1',JSON.stringify({work:{name:'Bornova',lat:38.4599,lon:27.2215,kind:'work'},prefs:{theme:'light',tilt:false}}));});
+ await setup(page);await page.waitForFunction(()=>!__yolcu.S.map.isMoving(),null,{timeout:10000});await page.waitForTimeout(1500);const shot=async name=>{await page.screenshot({path:`${out}/${name}.png`,timeout:20000});};
+ await shot('home');await page.locator('[data-act=toggle3d]').click();await page.waitForTimeout(1500);await shot('home-3d');await page.locator('[data-act=toggle3d]').click();await page.waitForTimeout(1000);await page.locator('[data-act=openSearch]').click();await shot('search');await page.locator('[data-act=cancelSearch]').click();
+ await page.locator('[data-act=openSettings]').click();await shot('settings');if(label==='after'){await page.locator('[data-act=openModels]').click();await page.waitForTimeout(1800);await shot('models');await page.locator('[data-act=closeSettings]').click();}else{await page.locator('#ai-model-select').scrollIntoViewIfNeeded();await shot('models');}await page.locator('[data-act=closeSettings]').click();
+ await page.evaluate(()=>__yolcu.onPos({lon:27.1045,lat:38.3695,acc:8,speed:0,t:Date.now()}));await page.locator('[data-act=fav][data-k=work]').click();await page.locator('.start-route').waitFor({timeout:60000});await shot('routes');
+ await page.locator('[data-act=preview]').click();await page.waitForFunction(()=>__yolcu.S.sim);await page.evaluate(()=>{const {S}=__yolcu;S.sim.pause();S.follow=false;S.map.stop();setInterval(()=>__yolcu.onPos({...S.pos,speed:0,t:Date.now()}),500);});await shot('navigation');
+ const multi=JSON.parse(readFileSync(new URL('../tests/fixtures/izmir-multiple-stops.json',import.meta.url)));
+ await page.route('**/*overpass*/**',r=>r.fulfill({json:{elements:multi[0].stops.map(p=>({lat:p.lat,lon:p.lon,tags:{name:p.name,amenity:'fuel'}}))}}));
+ await page.locator('#nav-bottom [data-act=openRoadside]').click();await shot('roadside');await page.locator('[data-rs=category][data-id=fuel]').click();await page.locator('[data-rs=detail]').first().waitFor({timeout:60000});await shot('results');await page.locator('[data-rs=detail]').first().click();await page.locator('[data-rs=focus]').click();await page.waitForTimeout(600);await shot('place');await page.locator('[data-rs=close]').click();await page.evaluate(()=>__yolcu.endNav());await page.locator('[data-act=openSettings]').click();await page.locator('[data-act=theme][data-v=dark]').click();await shot('settings-dark');await page.locator('[data-act=closeSettings]').click();await page.waitForTimeout(500);await shot('home-dark');
+} finally {await browser.close();}

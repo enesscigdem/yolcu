@@ -1,11 +1,12 @@
 // TomTom (ücretsiz katman): canlı trafik, kazalar/yol çalışmaları, trafikli süre ve işletme arama.
-// Anahtar sadece telefonda saklanır (Ayarlar › Trafik).
+// Tarayıcı yalnız aynı kaynaktaki sunucu vekilini kullanır; anahtar sunucudadır.
 import { projectOnSegment, cumulative, sameRoute, bearing } from './geo.js';
 
 const API = 'https://api.tomtom.com';
 async function request(url, options = {}) {
   const timeout = AbortSignal.timeout(15000);
   const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
+  if(typeof window!=='undefined'){const target=new URL(url);target.searchParams.delete('key');url='/api/traffic'+target.pathname+target.search;}
   const r = await fetch(url, { ...options, signal, referrerPolicy: 'no-referrer' });
   if (!r.ok) {
     const message = r.status === 401 || r.status === 403 ? 'TomTom anahtarı veya servis yetkisi geçersiz' : r.status === 429 ? 'TomTom istek sınırına ulaşıldı; biraz sonra tekrar dene' : 'TomTom servisine ulaşılamadı';
@@ -16,7 +17,7 @@ async function request(url, options = {}) {
 
 // Vektör trafik verisi: her yol parçasında traffic_level (0 = durmuş, 1 = akıcı) ve road_closure var.
 // Kendimiz çiziyoruz: akıcı yollar boyanmaz, sadece yavaş/sıkışık/kapalı olanlar (Apple gibi).
-export const flowTiles = key => `${API}/traffic/map/4/tile/flow/relative/{z}/{x}/{y}.pbf?key=${encodeURIComponent(key)}`;
+export const flowTiles = key => typeof window!=='undefined'?'/api/traffic/traffic/map/4/tile/flow/relative/{z}/{x}/{y}.pbf':`${API}/traffic/map/4/tile/flow/relative/{z}/{x}/{y}.pbf?key=${encodeURIComponent(key)}`;
 
 export const CATS = {
   0: ['Olay', '⚠️'], 1: ['Kaza', '💥'], 2: ['Sis', '🌫️'], 3: ['Tehlikeli yol', '⚠️'], 4: ['Yağmur', '🌧️'],

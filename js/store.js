@@ -2,7 +2,7 @@
 const isPreview = typeof location !== 'undefined' && ['localhost', '127.0.0.1'].includes(location.hostname) && new URLSearchParams(location.search).get('preview') === '1';
 const KEY = isPreview ? 'yolcu.preview.v1' : 'yolcu.v1';
 const CREDENTIAL_KEY = 'yolcu.tomtom.v1';
-const validKey = value => typeof value === 'string' && /^[A-Za-z0-9_-]{16,128}$/.test(value);
+
 
 const DEFAULTS = {
   home: null,
@@ -40,11 +40,11 @@ const DEFAULTS = {
 function load() {
   try {
     const raw = localStorage.getItem(KEY);
-    const credential = localStorage.getItem(CREDENTIAL_KEY);
-    if (!raw) return { ...structuredClone(DEFAULTS), tomtomKey: validKey(credential) ? credential : null };
+    localStorage.removeItem(CREDENTIAL_KEY);
+    if (!raw) return structuredClone(DEFAULTS);
     const d = JSON.parse(raw);
     const merged = { ...structuredClone(DEFAULTS), ...d, prefs: { ...DEFAULTS.prefs, ...(d.prefs || {}) } };
-    merged.tomtomKey = validKey(credential) ? credential : (validKey(d.tomtomKey) ? d.tomtomKey : null);
+    merged.tomtomKey=null;if(d.tomtomKey){delete d.tomtomKey;localStorage.setItem(KEY,JSON.stringify(d));}
     // First migration deliberately respects the owner's new silent default.
     if (!['silent', 'alerts', 'guidance'].includes(d.prefs?.soundMode)) merged.prefs.soundMode = 'silent';
     merged.roadside = { ...DEFAULTS.roadside, ...(d.roadside || {}) };
@@ -59,8 +59,7 @@ export const store = load();
 
 export function save() {
   try {
-    if (validKey(store.tomtomKey)) localStorage.setItem(CREDENTIAL_KEY, store.tomtomKey);
-    else localStorage.removeItem(CREDENTIAL_KEY);
+    localStorage.removeItem(CREDENTIAL_KEY);
     const { tomtomKey, ...data } = store;
     localStorage.setItem(KEY, JSON.stringify(data));
     return true;
@@ -107,7 +106,7 @@ export function packForLink() {
 export function unpackFromLink(str) {
   const b = str.replace(/-/g, '+').replace(/_/g, '/');
   const d = JSON.parse(decodeURIComponent(escape(atob(b))));
-  for (const k of ['home', 'work', 'places', 'trips', 'savedRoutes', 'avoids', 'radars', 'tomtomKey']) if (d[k] != null) store[k] = d[k];
+  for (const k of ['home', 'work', 'places', 'trips', 'savedRoutes', 'avoids', 'radars']) if (d[k] != null) store[k] = d[k];
   if (d.prefs) Object.assign(store.prefs, d.prefs);
   save();
 }
@@ -123,9 +122,4 @@ export function toggleRouteSaved(trip) {
   save();
 }
 
-export function refreshCredential() {
-  try {
-    const credential = localStorage.getItem(CREDENTIAL_KEY);
-    store.tomtomKey = validKey(credential) ? credential : null;
-  } catch { }
-}
+// Legacy browser credentials are intentionally no longer read.

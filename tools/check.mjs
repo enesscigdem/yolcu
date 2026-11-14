@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-for (const file of [...readdirSync('js').filter(f => f.endsWith('.js')).map(f => 'js/' + f), 'sw.js', 'server/dev.mjs']) execFileSync(process.execPath, ['--check', file]);
+for (const file of [...readdirSync('js').filter(f => f.endsWith('.js')).map(f => 'js/' + f), 'sw.js', ...readdirSync('server').filter(f=>f.endsWith('.mjs')).map(f=>'server/'+f)]) execFileSync(process.execPath, ['--check', file]);
 const html = readFileSync('index.html', 'utf8');
 const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map(m => m[1]);
 if (new Set(ids).size !== ids.length) throw new Error('Duplicate HTML IDs');

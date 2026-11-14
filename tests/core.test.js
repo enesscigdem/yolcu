@@ -58,7 +58,7 @@ test('existing installs migrate to silence; trip, favorite, avoids and settings 
   const memory=new Map([['yolcu.v1',JSON.stringify({prefs:{voice:true,radarSound:true}})]]);globalThis.localStorage={getItem:k=>memory.get(k)||null,setItem:(k,v)=>memory.set(k,v),removeItem:k=>memory.delete(k)};
   const {store,save,addTrip,toggleRouteSaved,exportBackup,importBackup,packForLink}=await import('../js/store.js?storage-test');
   store.tomtomKey='local-test-credential-1234567890';save();
-  assert.equal(memory.get('yolcu.tomtom.v1'),store.tomtomKey);assert.ok(!memory.get('yolcu.v1').includes(store.tomtomKey));
+  assert.equal(memory.has('yolcu.tomtom.v1'),false);assert.ok(!memory.get('yolcu.v1').includes(store.tomtomKey));
   assert.ok(!exportBackup().includes(store.tomtomKey));assert.ok(!Buffer.from(packForLink().replace(/-/g,'+').replace(/_/g,'/'),'base64').toString().includes(store.tomtomKey));
   assert.equal(store.prefs.soundMode,'silent');const prefsRef=store.prefs;
   const trip={id:'completed',dest:{name:'İş',lon:27,lat:38},origin:{name:'Ev',lon:27,lat:38},duration:600,distance:2000,endedAt:Date.now(),coords:[[27,38],[27.01,38]],segments:[]};
@@ -68,7 +68,7 @@ test('existing installs migrate to silence; trip, favorite, avoids and settings 
   try {
     globalThis.location={hostname:'localhost',search:'?preview=1'};
     const preview=await import('../js/store.js?preview-shared-credential');
-    assert.equal(preview.store.tomtomKey,store.tomtomKey);assert.equal(preview.store.prefs.maxExtraMinutes,5);assert.equal(preview.store.trips.length,0);
+    assert.equal(preview.store.tomtomKey,null);assert.equal(preview.store.prefs.maxExtraMinutes,5);assert.equal(preview.store.trips.length,0);
   } finally { if(previousLocation===undefined)delete globalThis.location;else globalThis.location=previousLocation; }
 });
 
