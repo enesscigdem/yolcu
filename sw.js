@@ -1,9 +1,9 @@
 // Yolcu service worker: uygulama dosyalarını önbelleğe alır, internet yokken de açılır
-const VERSION = 'yolcu-v7';
+const VERSION = 'yolcu-v12';
 const SHELL = [
   './', 'index.html', 'app.css', 'manifest.webmanifest',
   'js/app.js', 'js/api.js', 'js/geo.js', 'js/guide.js', 'js/icons.js', 'js/mapstyle.js', 'js/nav.js', 'js/store.js',
-  'js/traffic.js', 'js/radar.js', 'data/radars-tr.json',
+  'js/traffic.js', 'js/radar.js', 'js/audio.js', 'js/location.js', 'js/replan.js', 'js/diagnostics.js', 'js/stops.js', 'js/needs.js', 'js/assistant.js', 'js/roadside.js', 'data/radars-tr.json',
   'icons/komur-180.png', 'icons/mavi-180.png', 'icons/yol-180.png', 'icons/harita-180.png', 'icons/gece-180.png', 'icons/y-180.png'
 ];
 const CDN = ['https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js', 'https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css'];
@@ -22,6 +22,8 @@ self.addEventListener('fetch', e => {
   const req = e.request;
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
+
+  if(url.origin===location.origin&&url.pathname.startsWith('/api/'))return;
 
   // Uygulama dosyaları: önce ağ (güncel kalsın), 3 sn'de gelmezse önbellek
   if (url.origin === location.origin) {

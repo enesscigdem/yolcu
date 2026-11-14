@@ -1,31 +1,29 @@
-import { store, save, addRecent, isSaved, toggleSaved, exportBackup, importBackup, packForLink, unpackFromLink } from './store.js';
+import { store, save, addRecent, isSaved, toggleSaved, exportBackup, importBackup, packForLink, unpackFromLink, addTrip, toggleRouteSaved, refreshCredential } from './store.js';
+import { remainingDwellSeconds } from './stops.js';
+import { Roadside } from './roadside.js';
+import { RELEASE, hasServerAPI, SERVER_UNAVAILABLE } from './assistant.js';
+import { routeCharacter } from './needs.js';
+import { FixStream } from './location.js';
+import { Replanner } from './replan.js';
+import { Diagnostics, FollowCamera } from './diagnostics.js';
+import { createAudio, SOUND_MODES } from './audio.js';
 import * as api from './api.js';
 import * as traffic from './traffic.js';
 import * as radar from './radar.js';
-import { loadStyle, applyPalette, setTerrain, PALETTES, ACCENT, firstLabelLayer } from './mapstyle.js';
+import { loadStyle, applyPalette, setTerrain, PALETTES, ACCENT, firstLabelLayer, setRouteBuildings } from './mapstyle.js';
 import * as G from './guide.js';
 import { Navigator, Simulator } from './nav.js';
 import { I, KIND_ICON } from './icons.js';
-import { dist, bearing, sliceAlong, pointAt, compass } from './geo.js';
+import { dist, bearing, sliceAlong, pointAt, compass, fixTimestamp } from './geo.js';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const PREVIEW = ['localhost', '127.0.0.1'].includes(location.hostname) && new URLSearchParams(location.search).get('preview') === '1';
 const IZMIR = { lon: 27.142, lat: 38.423 };
 const EMPTY = { type: 'FeatureCollection', features: [] };
 const wide = () => window.innerWidth >= 700;
 const ICONS = { komur: 'Kömür', mavi: 'Mavi Ok', yol: 'Gün Batımı', harita: 'Harita', gece: 'Gece', y: 'Y Ayrımı' };
 const TRAVEL = { auto: ['Araba', 'car'], pedestrian: ['Yürüyüş', 'walk'] };
-
-// Eski sürümden gelen ayarları güncelle
-if (!store.prefs.v3) {
-  store.prefs.tilt = false;
-  store.prefs.radar = true;
-  store.prefs.radarSound = true;
-  delete store.prefs.voiceEngine;
-  store.prefs.v3 = true;
-  save();
-}
-if (!Array.isArray(store.radars)) store.radars = [];
 
 const S = {
   map: null, mapReady: false, pos: null, firstFix: true, puck: null, destMarker: null,
@@ -37,7 +35,31 @@ const S = {
   cams: [], official: [], navCams: [], weather: null, weatherAt: null,
   eta: {}, helloK: null, trip: null, prog: null, lastView: null
 };
+const fixes = new FixStream(), diagnostics = new Diagnostics(), camera = new FollowCamera();
 const key = () => store.tomtomKey;
+function tripContext(){const route=S.navRoute||S.routes[S.sel];if(!route||!S.pos||Date.now()-S.pos.t>5000)return null;return {route,along:S.nav?.along||0,from:{...S.pos},to:S.dest,prefs:{...store.prefs},avoids:[...structuredClone(store.avoids),...(S.tripAvoids||[])],stops:structuredClone(S.stops||route.stops||[]),traffic:trafficProvider(),manualOrder:!!S.stopOrderManual,activeDwellSeconds:remainingDwellSeconds([],S.activeDwell)};}
+const roadside=new Roadside({store,save,planner:api.planRoutes,canPark:()=>!S.sim||PREVIEW,position:()=>PREVIEW&&S.pos?Promise.resolve({...S.pos,t:Date.now()}):freshPosition(),context:tripContext,toast,
+ findNearby:async(cat,point,signal)=>{if(key()){try{const found=await traffic.poiSearch(key(),cat,point,signal);if(found.length)return found;}catch(e){if(e.name==='AbortError')throw e;}}const list=await api.nearby({...cat,r:3500,fallback:cat.label},point,signal);return cat.brand?list.filter(p=>(p.name+' '+p.brand).toLocaleLowerCase('tr-TR').includes(cat.brand.toLocaleLowerCase('tr-TR'))):list;},
+ savePlace:p=>{if(!isSaved(p))toggleSaved(p);},
+ onPickEntrance:p=>{if(S.nav)return toast('Araç girişi kaydetmek için sürüşü bitir');S.entranceGoal={...p};roadside.close();goHome();sheet.set('peek');S.map?.easeTo({center:[p.lon,p.lat],zoom:17,pitch:0,duration:700});toast('Haritada araç girişine basılı tut, ardından Giriş olarak kaydet seç',6000);},
+ onPanel:()=>{if(S.nav&&S.pos)navTick({...S.pos,_received:performance.now()});},
+ onAdd:choice=>applyStopChoice(choice),onStops:(stops,route,from)=>changeStops(stops,route,from),
+ onPark:choice=>startParkingRoute(choice),onParked:()=>continueAfterParking(),
+ onGo:(dest,travel)=>{if(S.nav)endNav();S.travel=travel;openRoutes(dest);},onAvoid:()=>avoidNextTurn()
+});
+function applyStopChoice(choice){
+ if(!S.nav){toast('Durak eklemek için sürüşü başlat');return;}if((choice.route.stops||[]).length>3){toast('En fazla üç durak ekleyebilirsin');return;}
+ if(!S.pos||Date.now()-S.pos.t>5000){toast('Güncel konum bekleniyor');return;}
+ replanner.cancel();S.stops=choice.route.stops||choice.stops;S.stopOrderManual=true;
+ if(dist(choice.from.lon,choice.from.lat,S.pos.lon,S.pos.lat)<45){if(!commitRoute(choice.route))replanner.run('add-stop',true);}else replanner.run('add-stop',true);
+ saveActiveNav();toast('Ara durak eklendi');
+}
+function changeStops(stops,route,from){if(!S.nav)return;S.stops=stops;S.stopOrderManual=true;roadside.invalidate();saveActiveNav();if(route&&from&&dist(from.lon,from.lat,S.pos.lon,S.pos.lat)<45&&commitRoute(route))return;replanner.run('edit-stops',true);}
+async function startParkingRoute(choice){if(!S.nav)return;const destination=S.dest;S.walkGoal=choice.finalDest||destination;S.dest={...choice.place,kind:'parking'};S.parkingDwell=choice.place.dwellMinutes||0;S.stops=choice.route.stops||[];S.tripAvoids ||= [];if(dist(choice.from.lon,choice.from.lat,S.pos.lon,S.pos.lat)<45&&commitRoute(choice.route)){setDest(S.dest);saveActiveNav();}else replanner.run('parking',true);}
+function continueAfterParking(){if(!S.walkGoal)return;const goal=S.walkGoal,parked=store.parkedCar;S.walkGoal=null;endNav();if(PREVIEW&&parked){fixes.reset();onPos({...parked,acc:8,speed:0,heading:null,t:Date.now()});}S.travel='pedestrian';openRoutes(goal);}
+function avoidNextTurn(){if(!S.nav||!S.lastState?.matched||!S.lastState.up)return toast('Yaklaşan dönüş için konumun doğrulanması gerekiyor');const r=S.navRoute,at=Math.min(r.lengthM-30,S.lastState.up.along+25);if(at<=S.nav.along+10)return toast('Bu noktada dışlanacak bir yol kesimi yok');const p=pointAt(r.coords,r.cum,at);S.tripAvoids ||= [];S.tripAvoids.push({...p,name:'Bu yolculukta istenmeyen dönüş'});S.tripAvoids=S.tripAvoids.slice(-12);closeNavMenu();roadside.close();replanner.run('avoid-turn',true);toast('Bu dönüşü kullanmadan alternatif aranıyor');}
+
+addEventListener('storage', e => { if (e.key === 'yolcu.tomtom.v1') { refreshCredential(); if (S.mapReady) { setFlow(); loadIncidents(true); } } });
 // "Otomatik" tema gün doğumu / batımına göre (hava servisinden); bilinmiyorsa telefonun ayarı
 const theme = () => {
   const p = store.prefs.theme;
@@ -53,7 +75,7 @@ function introFly(p) {
   const tilt = store.prefs.tilt;
   m.jumpTo({ center: [p.lon, p.lat], zoom: 11.6, pitch: 0, bearing: 0 });
   requestAnimationFrame(() => m.flyTo({
-    center: [p.lon, p.lat], zoom: tilt ? 16.3 : 15.6, pitch: tilt ? 56 : 30, bearing: -18,
+    center: [p.lon, p.lat], zoom: tilt ? 16.3 : 15.6, pitch: tilt ? 56 : 0, bearing: -18,
     duration: 2600, curve: 1.25, essential: true,
     padding: { top: 0, bottom: wide() ? 0 : sheet.visible() * 0.5, left: wide() ? 420 : 0, right: 0 }
   }));
@@ -96,11 +118,12 @@ function applyTheme() {
   const t = theme();
   document.documentElement.dataset.map = t;
   if (!S.mapReady) return;
-  applyPalette(S.map, PALETTES[t], { type: store.prefs.mapType, nav: !!S.nav });
+  applyPalette(S.map, PALETTES[t], { type: S.nav ? 'standard' : store.prefs.mapType, nav: !!S.nav });
   // 3B arazi sadece gezinirken: navigasyonda MapLibre 4 kamerayı deniz seviyesine göre hesapladığından
   // konum oku arazinin üstünde kayıyor; ayrıca iPhone'da navigasyon daha akıcı oluyor.
   setTerrain(S.map, !!(store.prefs.tilt && !S.nav));
   setFlow();
+  setRouteBuildings(S.map,S.navRoute,S.nav?.along||0,diagnostics.quality);
 }
 mq.addEventListener?.('change', applyTheme);
 
@@ -115,43 +138,25 @@ function toast(msg, ms = 2600) {
   toastT = setTimeout(() => { t.hidden = true; }, ms);
 }
 
+addEventListener('yolcu-storage-error', () => toast('Cihazdaki depolama alanına kayıt yapılamadı. Yedek alıp eski yolculukları silebilirsin.', 6000));
+
 /* ================= Ses (telefonun kendi sesi) ================= */
-const voice = {
-  ok: 'speechSynthesis' in window, v: null,
-  init() {
-    if (!this.ok) return;
-    const pick = () => {
-      const vs = speechSynthesis.getVoices().filter(x => /^tr/i.test(x.lang));
-      this.v = vs.find(x => /gelişmiş|enhanced|premium/i.test(x.name)) || vs.find(x => /yelda/i.test(x.name)) || vs[0] || null;
-    };
-    pick();
-    speechSynthesis.addEventListener?.('voiceschanged', pick);
-  },
-  unlock() {
-    radar.unlockBeep();
-    try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch { }
-    if (this.ok) { try { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; speechSynthesis.speak(u); } catch { } }
-  },
-  say(text, force = false) {
-    if (!this.ok || !text || (!store.prefs.voice && !force)) return;
-    const go = () => {
-      const u = new SpeechSynthesisUtterance(text);
-      u.lang = 'tr-TR'; if (this.v) u.voice = this.v; u.rate = 1;
-      speechSynthesis.speak(u);
-    };
-    if (speechSynthesis.speaking || speechSynthesis.pending) { speechSynthesis.cancel(); setTimeout(go, 80); } else go();
-  },
-  stop() { if (this.ok) speechSynthesis.cancel(); }
-};
+const voice = createAudio(store.prefs);
 
 /* ================= Ekranı açık tut ================= */
 async function keepAwake(on) {
   try {
-    if (on && 'wakeLock' in navigator) { S.wake = await navigator.wakeLock.request('screen'); }
+    if (on && (!S.wake || S.wake.released) && 'wakeLock' in navigator) { S.wake = await navigator.wakeLock.request('screen'); }
     else if (!on && S.wake) { await S.wake.release(); S.wake = null; }
   } catch { }
 }
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && S.nav) keepAwake(true); });
+document.addEventListener('visibilitychange',()=>{
+  if(document.hidden){voice.stop();diagnostics.stop();S.sim?.pause();}
+  else if(S.nav){keepAwake(true);S.sim?.resume();diagnostics.start(adaptQuality);navHealth();if(!S.sim)freshPosition();}
+});
+addEventListener('pagehide',()=>{voice.stop();diagnostics.stop();replanner.cancel();S.sim?.pause();stopGeo();if(S.nav&&!S.sim)saveActiveNav();});
+addEventListener('pageshow',()=>{if(!PREVIEW)startGeo();if(S.nav){S.sim?.resume();diagnostics.start(adaptQuality);navHealth();}});
+addEventListener('online',()=>{if(S.nav&&S.lastState?.offRoute)replanner.run('online',true);});
 
 /* ================= Alt panel (sheet) ================= */
 const sheet = {
@@ -170,6 +175,18 @@ const sheet = {
   },
   heights() {
     const H = this.H();
+    if (S.view === 'home') {
+      const hasTrips=store.trips.length>0;
+      const recent=this.body.querySelector('[data-act=recent]');
+      const needed=recent?recent.getBoundingClientRect().bottom-this.el.getBoundingClientRect().top+12:0;
+      return {peek:Math.min(205+safeB(),H),half:Math.min(Math.max(hasTrips?390:300,needed)+safeB(),H*.66),full:H};
+    }
+    if(S.view==='place'){const last=this.body.lastElementChild;const content=last?last.getBoundingClientRect().bottom-this.el.getBoundingClientRect().top+16:260;return {peek:Math.min(this.peekH(),H),half:Math.min(content+safeB(),H*.7),full:H};}
+    if (S.view === 'routes') {
+      const start = this.body.querySelector('.start-route');
+      const needed = start ? start.getBoundingClientRect().bottom - this.el.getBoundingClientRect().top + safeB() + 14 : 380;
+      return { peek: Math.min(180 + safeB(), H), half: Math.min(Math.max(380 + safeB(), needed), H * .84), full: H };
+    }
     return { peek: Math.min(this.peekH(), H), half: Math.min(Math.max(Math.round(H * 0.55), this.peekH()), H), full: H };
   },
   set(d, anim = true) {
@@ -179,6 +196,7 @@ const sheet = {
     this.el.style.transition = anim ? 'transform .45s cubic-bezier(.32,.72,0,1)' : 'none';
     this.el.style.transform = `translateY(${this.y}px)`;
     this.el.dataset.detent = d;
+    this.el.dataset.view = S.view;
     if (d !== 'full') this.body.scrollTop = 0;
   },
   visible() { return this.H() - this.y; },
@@ -230,7 +248,7 @@ const sheet = {
 };
 
 /* ================= Harita ================= */
-const NAV_ARROW = `<svg viewBox="0 0 56 56"><circle cx="28" cy="28" r="23" fill="#16171A" stroke="#fff" stroke-width="3.5"/><path d="M28 13.5 L39 39 L28 33 L17 39 Z" fill="${ACCENT}" stroke="${ACCENT}" stroke-width="2" stroke-linejoin="round"/></svg>`;
+const NAV_ARROW = `<svg viewBox="0 0 40 72" aria-hidden="true"><defs><linearGradient id="body" x2="1" y2=".5"><stop stop-color="#96999C"/><stop offset=".45" stop-color="#F4F3EF"/><stop offset="1" stop-color="#8C9093"/></linearGradient></defs><rect x="3" y="17" width="5" height="12" rx="2" fill="#17191B"/><rect x="32" y="17" width="5" height="12" rx="2" fill="#17191B"/><rect x="5" y="49" width="4" height="12" rx="2" fill="#17191B"/><rect x="31" y="49" width="4" height="12" rx="2" fill="#17191B"/><path d="M8 11Q10 3 20 3T32 11L34 56Q34 68 20 69Q6 68 6 56Z" fill="url(#body)" stroke="#333638" stroke-width="1.5"/><path d="M11 21Q20 16 29 21L28 32H12Z" fill="#30383E"/><rect x="12" y="34" width="16" height="16" rx="3" fill="#BABCBA"/><path d="M12 52H28L30 59Q20 63 10 59Z" fill="#3B4248"/><path d="M9 12L15 10M25 10L31 12" stroke="#FFF4D6" stroke-width="3"/><path d="M9 63L15 65M25 65L31 63" stroke="#C95D36" stroke-width="3"/></svg>`;
 const PIN = `<svg viewBox="0 0 34 42"><path d="M17 41s-14-12.6-14-23.5a14 14 0 0 1 28 0C31 28.4 17 41 17 41z" fill="#16171A" stroke="#fff" stroke-width="2"/><circle cx="17" cy="17.5" r="5.5" fill="${ACCENT}"/></svg>`;
 
 // Harita simgeleri: emoji yerine sade çizimler (koyu daire + ince halka + beyaz/renkli sembol)
@@ -276,7 +294,7 @@ async function initMap() {
   catch { toast('Harita yüklenemedi. İnternet bağlantını kontrol et.', 5000); return; }
   const map = S.map = new maplibregl.Map({
     container: 'map', style, center: [IZMIR.lon, IZMIR.lat], zoom: 12, attributionControl: false,
-    maxPitch: 75, fadeDuration: 250, dragRotate: true, pitchWithRotate: true, antialias: true
+    maxPitch: 65, fadeDuration: 450, dragRotate: true, pitchWithRotate: true, antialias: true
   });
   map.on('load', () => {
     addLayers();
@@ -286,6 +304,7 @@ async function initMap() {
     if (S.pos) { S.firstFix = false; updatePuck(S.pos); introFly(S.pos); }
     loadIncidents();
     drawRadars();
+    if(PREVIEW&&S.pendingPreview){const screen=S.pendingPreview;S.pendingPreview=null;previewScreen(screen);}
   });
   // Mekan simgeleri ilk ihtiyaç anında çizilir (koyu daire + tek renkli sembol)
   map.on('styleimagemissing', e => {
@@ -293,10 +312,12 @@ async function initMap() {
     if (m && GLYPH[m[1]] && !map.hasImage(e.id)) map.addImage(e.id, glyphImage(m[1], POI_COLOR[m[1]] || '#E6E6E8', 'rgba(255,255,255,.18)'), { pixelRatio: 2 });
   });
   map.on('dragstart', () => {
-    if (S.nav) { S.follow = false; $('nav-recenter').hidden = false; $('nav-street').hidden = true; }
+    if (S.nav) { S.follow = false; S.overview=false; $('nav-recenter').hidden = false; $('nav-street').hidden = true; }
   });
-  // Navigasyonda konum oku kamerayla birlikte akıcı kaysın (GPS adımları arasında zıplamasın)
-  map.on('move', () => { if (S.nav && S.follow && S.puck && !S.arrived) puckAt(map.getCenter()); });
+  // The camera never writes the vehicle coordinate. Manual gestures release follow.
+  for (const event of ['rotatestart', 'zoomstart', 'pitchstart']) map.on(event, e => {
+    if (S.nav && e.originalEvent) { S.follow = false; S.overview=false; $('nav-recenter').hidden = false; }
+  });
   map.on('rotate', () => updateLocateBtn());
   map.on('pitchend', () => updateTiltBtn());
   map.on('moveend', () => { clearTimeout(S.incT); S.incT = setTimeout(() => { loadIncidents(); if (!S.nav) drawRadars(); }, 900); });
@@ -348,6 +369,8 @@ function addLayers() {
   const m = S.map, before = firstLabelLayer(m);
   const w = (a, b) => ['interpolate', ['exponential', 1.5], ['zoom'], 10, a, 18, b];
   const round = { 'line-join': 'round', 'line-cap': 'round' };
+  m.addSource('yolcu-traveled',{type:'geojson',data:EMPTY});
+  m.addLayer({id:'yolcu-traveled',type:'line',source:'yolcu-traveled',layout:round,paint:{'line-color':'#8B8580','line-opacity':.55,'line-width':w(4,15)}},before);
   m.addSource('yolcu-routes', { type: 'geojson', data: EMPTY });
   m.addSource('yolcu-jams', { type: 'geojson', data: EMPTY });
   m.addSource('yolcu-arrow', { type: 'geojson', data: EMPTY });
@@ -359,7 +382,7 @@ function addLayers() {
   m.addLayer({ id: 'yolcu-route', type: 'line', source: 'yolcu-routes', filter: ['get', 'sel'], layout: round, paint: { 'line-color': ACCENT, 'line-width': w(5.5, 19) } }, before);
   m.addLayer({
     id: 'yolcu-jams', type: 'line', source: 'yolcu-jams', layout: round,
-    paint: { 'line-width': w(5, 17), 'line-color': ['match', ['get', 'mag'], 3, '#D93A2F', 4, '#8E1A12', 2, '#E85A2C', '#F09A2A'] }
+    paint: { 'line-width': w(1.8, 4), 'line-offset': w(5, 13), 'line-dasharray': [2, 1.5], 'line-color': ['match', ['get', 'mag'], 3, '#D93A2F', 4, '#8E1A12', 2, '#E85A2C', '#F09A2A'] }
   }, before);
   m.addLayer({ id: 'yolcu-arrow-case', type: 'line', source: 'yolcu-arrow', minzoom: 13, filter: ['==', ['geometry-type'], 'LineString'], layout: round, paint: { 'line-color': '#16171A', 'line-width': w(5, 24) } });
   m.addLayer({ id: 'yolcu-arrow', type: 'line', source: 'yolcu-arrow', minzoom: 13, filter: ['==', ['geometry-type'], 'LineString'], layout: round, paint: { 'line-color': '#fff', 'line-width': w(3, 16) } });
@@ -548,6 +571,7 @@ function drawChips(route) {
   const best = S.routes[0];
   // Süre balonları: seçili rota vurgulu, alternatifler "+11 dk"; dokununca o rota seçilir
   S.routes.forEach((r, i) => {
+    if (i >= 2 && !S.details && i !== S.sel) return;
     const sel = i === S.sel;
     const p = sel ? pointAt(r.coords, r.cum, r.lengthM * 0.55) : divergePoint(r, route);
     if (!p) return;
@@ -558,16 +582,6 @@ function drawChips(route) {
     el.addEventListener('click', ev => { ev.stopPropagation(); selectRoute(i); });
     S.chips.push(new maplibregl.Marker({ element: el, anchor: 'bottom', offset: [0, -6] }).setLngLat([p.lon, p.lat]).addTo(S.map));
   });
-  if (!route?.story) return;
-  const roads = route.story.filter(s => s.kind === 'road').sort((a, b) => b.m - a.m).slice(0, 2);
-  for (const s of roads) {
-    const mid = (route.cum[Math.min(s.b, route.cum.length - 1)] + route.cum[Math.min(s.e, route.cum.length - 1)]) / 2;
-    const p = pointAt(route.coords, route.cum, mid);
-    const el = document.createElement('div');
-    el.className = `road-chip ${s.cls === 'motorway' || s.cls === 'trunk' || s.cls === 'primary' ? 'main' : ''}`;
-    el.textContent = api.abbr(s.name);
-    S.chips.push(new maplibregl.Marker({ element: el }).setLngLat([p.lon, p.lat]).addTo(S.map));
-  }
 }
 
 /* ---------- Haritada zaten yüklü mekanlardan kategori araması (anında) ---------- */
@@ -635,7 +649,7 @@ function updatePuck(p) {
     const el = document.createElement('div');
     el.className = 'puck';
     el.innerHTML = `<div class="puck-cone"></div><div class="puck-dot"></div><div class="puck-arrow">${NAV_ARROW}</div>`;
-    S.puck = new maplibregl.Marker({ element: el, rotationAlignment: 'map', pitchAlignment: 'viewport' }).setLngLat([p.lon, p.lat]).addTo(S.map);
+    S.puck = new maplibregl.Marker({ element: el, rotationAlignment: 'map', pitchAlignment: 'map' }).setLngLat([p.lon, p.lat]).addTo(S.map);
   }
   if (!S.nav) {
     puckAt([p.lon, p.lat]);
@@ -649,22 +663,20 @@ function setPuckNav(on) {
   S.puckGround?.getElement().classList.toggle('nav', on);
 }
 
-function onPos(p) {
-  const prev = S.pos;
-  if (p.speed == null || Number.isNaN(p.speed)) {
-    p.speed = 0;
-    if (prev) { const dt = (p.t - prev.t) / 1000; if (dt > 0 && dt < 10) p.speed = dist(prev.lon, prev.lat, p.lon, p.lat) / dt; }
-  }
-  if (p.heading == null || Number.isNaN(p.heading)) {
-    p.heading = prev && dist(prev.lon, prev.lat, p.lon, p.lat) > 4 ? bearing(prev.lon, prev.lat, p.lon, p.lat) : prev?.heading ?? null;
-  }
+function onPos(input,replay=false) {
+  const began=performance.now();
+  const p=fixes.accept(input,replay?fixTimestamp(input.t):Date.now());
+  if(!p){if(S.nav)navHealth();return;}
+  p._received=began;
+  if (!Number.isFinite(p.lon) || !Number.isFinite(p.lat) || (S.pos && p.t < S.pos.t)) return;
   const first = !S.pos;
   S.pos = p;
+  if (!S.sim) S.realPos = p;
   updatePuck(p);
   if (first) { updateLocateBtn(); loadRadars(p); updateWeather(p); }
   if (S.firstFix && S.mapReady && !S.nav) { S.firstFix = false; introFly(p); }
   if (!S.nav) refreshHello();
-  if (S.nav) navTick(p);
+  if (S.nav) navTick(p,began);
   else {
     updateWhere(p);
     updateWeather(p);
@@ -672,9 +684,11 @@ function onPos(p) {
   }
 }
 
+function stopGeo(){if(S.geoWatch!=null){navigator.geolocation?.clearWatch(S.geoWatch);S.geoWatch=null;}}
 function startGeo() {
+  if(S.geoWatch!=null)return;
   if (!('geolocation' in navigator)) { toast('Bu cihazda konum desteği yok'); return; }
-  navigator.geolocation.watchPosition(
+  S.geoWatch = navigator.geolocation.watchPosition(
     g => {
       if (S.sim) return;
       const c = g.coords;
@@ -691,6 +705,18 @@ function waitPos(ms = 8000) {
     const t0 = Date.now();
     const iv = setInterval(() => { if (S.pos || Date.now() - t0 > ms) { clearInterval(iv); res(S.pos); } }, 250);
   });
+}
+
+async function freshPosition() {
+  if (S.pos && Date.now() - S.pos.t < 1500 && S.pos.acc <= 50) return S.pos;
+  if (!navigator.geolocation) return null;
+  try {
+    const g = await new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, maximumAge: 0, timeout: 8000 }));
+    const c = g.coords;
+    const p = { lat: c.latitude, lon: c.longitude, acc: c.accuracy, heading: c.heading, speed: c.speed, alt: c.altitude, t: g.timestamp || Date.now() };
+    onPos(p);
+  } catch { }
+  return S.pos && Date.now() - S.pos.t < 10000 && S.pos.acc <= 80 ? S.pos : null;
 }
 
 function updateWhere(p) {
@@ -735,73 +761,43 @@ function placeRow(p, act, i, kind) {
 function prefsList(travel = 'auto') {
   const P = store.prefs;
   const row = (k, title, sub) => `<label class="row"><span class="row-main"><span class="row-title">${title}</span><span class="row-sub wrap">${sub}</span></span><input type="checkbox" class="switch" data-pref="${k}" ${P[k] ? 'checked' : ''}></label>`;
-  if (travel !== 'auto') return `<div class="list plain">${row('hills', 'Yokuşlardan kaçın', 'Dik yokuş ve merdivenleri önermez')}</div>`;
+  if (travel !== 'auto') return `<div class="list plain">${row('hills', 'Yokuşlardan kaçın', 'Alternatifleri mevcut eğim ve merdiven verisiyle karşılaştırır')}</div>`;
   return `<div class="list plain">
     ${row('highways', 'Ana yolları tercih et', 'Otoyol, çevre yolu ve bulvarlar')}
-    ${row('hills', 'Yokuşlardan kaçın', 'Dik yokuşlu yolları önermez')}
-    ${row('rough', 'Bozuk yollardan kaçın', 'Kötü yüzeyli yolları önermez')}
+    ${row('hills', 'Yokuşlardan kaçın', 'Alternatifler arasında mevcut eğim verisini karşılaştırır')}
+    ${row('rough', 'Bozuk yollardan kaçın', 'Toprak yolları dışlar; bilinen yüzeyleri karşılaştırır')}
     ${row('tolls', 'Ücretli yollardan kaçın', 'Otoyol ve köprü ücretleri')}
-  </div>`;
+    <label class="row"><span class="row-main"><span class="row-title">Rahat rota için ek süre</span><span class="row-sub">En hızlı bulunan rotaya göre üst sınır</span></span><select data-pref="maxExtraMinutes" aria-label="En fazla ek süre">${[0, 3, 5, 10, 15, 20].map(n => `<option value="${n}" ${Number(P.maxExtraMinutes) === n ? 'selected' : ''}>${n} dk</option>`).join('')}</select></label>
+  </div><p class="group-foot">Yokuş tercihi bulunan alternatifleri sıralar; tüm yolların eğim ve yüzey bilgisi bulunmayabilir. Kesin kaçınmak istediğin kesimi ayrıca işaretleyebilirsin.</p>`;
 }
 
+function tripRows(list, act = 'openTrip') {
+  return list.map((t, i) => `<button class="row trip-row" data-act="${act}" data-i="${i}">${placeIcon(t.dest.kind || 'work')}<span class="row-main"><span class="row-title">${esc(t.dest.name)}${t.dest.sub ? ' · ' + esc(t.dest.sub) : ''}</span><span class="row-sub">${new Date(t.endedAt).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' })} · ${G.fmtDur(t.duration)} · ${G.fmtDist(t.distance)}</span></span><span class="row-chevron">${I.chevron}</span></button>`).join('');
+}
 function viewHome() {
-  const fav = (k, label, icon) => {
-    const p = store[k];
-    const e = S.eta[k];
-    const sub = p ? (e ? `${Math.max(1, Math.round(e.time / 60))} dk` : (distFromMe(p) || 'Git')) : 'Ekle';
-    return `<button class="fav" data-act="fav" data-k="${k}"><span class="fav-icon k-${k}">${I[icon]}</span><span class="fav-title">${label}</span><span class="fav-sub">${sub}</span></button>`;
-  };
-  const places = store.places.map((p, i) => {
-    const [ic, col] = KIND_ICON[p.kind] || KIND_ICON.star;
-    return `<button class="fav" data-act="favPlace" data-i="${i}"><span class="fav-icon ${col}">${I[ic]}</span><span class="fav-title">${esc(p.name)}</span><span class="fav-sub">${distFromMe(p) || ''}</span></button>`;
-  }).join('');
+  const fav = (k, label, icon) => `<button class="fav" data-act="fav" data-k="${k}"><span class="fav-icon">${I[icon]}</span><span class="fav-title">${label}${S.eta[k] ? ` <em>· ${Math.max(1, Math.round(S.eta[k].time / 60))} dk</em>` : ''}</span></button>`;
   const an = store.activeNav;
-  const resume = an && !S.nav && Date.now() - an.t < 4 * 3600e3
-    ? `<button class="resume" data-act="resumeNav">${I.car}<span style="flex:1"><b>Yola devam et</b><small>${esc(an.dest.name)}</small></span><span class="close" data-act="dismissResume">${I.x}</span></button>` : '';
-  const recents = store.recents.length
-    ? `<div class="list">${store.recents.slice(0, 6).map((p, i) => placeRow(p, 'recent', i, 'recent')).join('')}</div>`
-    : `<div class="list"><div class="empty">Gittiğin yerler burada görünecek.</div></div>`;
-  const ttHint = !key() ? `<button class="tip" data-act="openSettings"><span class="row-icon c-orange">${I.warn}</span><span class="t"><b>Trafik bilgisi kapalı</b><small>Açmak için dokun</small></span>${I.chevron}</button>` : '';
-  // Akıllı karşılama: günün saatine ve nerede olduğuna göre tek dokunuşla yola çık
-  let hello = '';
-  const hk = !resume && S.helloK;
-  if (hk) {
-    const e = S.eta[hk];
-    const label = hk === 'work' ? 'İşe' : 'Eve';
-    const min = e ? Math.max(1, Math.round(e.time / 60)) : null;
-    const dm = e?.delay != null ? Math.round(e.delay / 60) : null;
-    const eta = e ? G.fmtClock(new Date(Date.now() + e.time * 1000)) : '';
-    const sub = !e ? 'Süre hesaplanıyor…'
-      : dm == null ? `${eta} varış · tahmini`
-        : dm >= 2 ? `Trafikte +${dm} dk · ${eta} varış` : `Trafik akıcı · ${eta} varış`;
-    const dot = dm == null ? '' : dm >= 6 ? 'bad' : dm >= 2 ? 'warn' : '';
-    hello = `<div class="hello${e ? '' : ' loading'}" data-act="helloOpen" data-k="${hk}" data-peek>
-      <div class="hello-main">
-        <div class="hello-eyebrow">${greeting()}</div>
-        <div class="hello-title">${label} <em>${min ? `${min} dk` : '…'}</em></div>
-        <div class="hello-sub">${e && dm != null ? `<span class="dot ${dot}"></span>` : ''}${esc(sub)}</div>
-      </div>
-      <button class="go" data-act="helloGo" data-k="${hk}">GİT</button>
-    </div>`;
-  }
-  return `
-    <div class="search-row">
-      <button class="searchbar" data-act="openSearch">${I.search}<span>Nereye?</span></button>
-      <button class="icon-btn" data-act="openSettings" aria-label="Ayarlar">${I.gear}</button>
-    </div>
-    ${resume}${hello}
-    <div class="favs" ${hello ? '' : 'data-peek'}>
-      ${fav('work', 'İş', 'work')}
-      ${fav('home', 'Ev', 'home')}
-      ${places}
-      <button class="fav" data-act="addPlace"><span class="fav-icon add">${I.plus}</span><span class="fav-title">Ekle</span><span class="fav-sub">&nbsp;</span></button>
-    </div>
-    ${ttHint}
-    <div class="section">
-      <div class="section-head"><h3>Son kullanılanlar</h3>${store.recents.length ? '<button class="link small" data-act="clearRecents">Temizle</button>' : ''}</div>
-      ${recents}
-    </div>
-    <p class="legal">Harita © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> katkıcıları · OpenFreeMap · Mapterhorn · Uydu © Esri · Rota: Valhalla · Hava: Open‑Meteo · Radar: EGM, OSM${key() ? ' · Trafik © TomTom' : ''}</p>`;
+  return `<div class="search-row"><button class="searchbar" data-act="openSearch">${I.search}<span>Nereye?</span></button><button class="icon-btn" data-act="openSettings" aria-label="Ayarlar">${I.gear}</button></div>
+    <div class="favs">${fav('home', 'Ev', 'home')}${fav('work', 'İş', 'work')}<button class="fav fav-add" data-act="addPlace" aria-label="Yer ekle">${I.plus}</button></div>
+    <button class="preference-chip" data-act="routePrefs">${I.road}<span>${store.prefs.highways ? 'Ana yol odaklı' : 'Rota tercihleri'}</span><span class="down">${I.chevron}</span></button>
+    ${an && Date.now() - an.t < 4 * 3600e3 ? `<button class="resume" data-act="resumeNav">${I.car}<span style="flex:1"><b>Yola devam et</b><small>${esc(an.dest.name)}</small></span><span class="close" data-act="dismissResume">${I.x}</span></button>` : ''}
+    <div class="section home-trips ${store.trips.length?'':'compact-empty'}"><div class="section-head"><h3>Son yolculuklar</h3>${store.trips.length?'<button class="link small" data-act="allTrips">Tümü</button>':''}</div><div class="list">${store.trips.length ? tripRows(store.trips.slice(0, 3)) : '<div class="empty">Tamamladığın yolculuklar burada görünecek.</div>'}</div></div>
+    <div class="rs-home-links"><button class="link" data-act="openRoadside">Yol üstü</button><button class="link" data-act="personalPlaces">Benim yerlerim</button></div>
+    ${store.savedRoutes.length ? `<div class="section"><div class="section-head"><h3>Favori güzergâhlar</h3></div><div class="list">${tripRows(store.savedRoutes, 'openSavedRoute')}</div></div>` : ''}
+    ${store.places.length ? `<div class="section"><div class="section-head"><h3>Kayıtlı yerler</h3></div><div class="list">${store.places.map((p, i) => placeRow(p, 'favPlace', i)).join('')}</div></div>` : ''}
+    <div class="section"><div class="section-head"><h3>Son aramalar</h3>${store.recents.length ? '<button class="link small" data-act="clearRecents">Temizle</button>' : ''}</div><div class="list">${store.recents.length ? store.recents.map((p, i) => placeRow(p, 'recent', i, 'recent')).join('') : '<div class="empty">Aradığın yerler burada görünecek.</div>'}</div></div>
+    <button class="row" data-act="avoidList">${placeIcon('road')}<span class="row-main"><span class="row-title">Kaçındığım yollar</span><span class="row-sub">${store.avoids.length} kayıt · haritada basılı tutarak ekle</span></span>${I.chevron}</button>
+    <p class="legal">© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> · OpenFreeMap · Mapterhorn · Esri · Valhalla${key() ? ' · TomTom' : ''}</p>`;
+}
+function viewHistory() {
+  const t = S.tripView;
+  if (!t) return `<div class="card-head"><h2>Yolculuklar</h2><button class="close" data-act="goHome" aria-label="Kapat">${I.x}</button></div><div class="list">${tripRows(store.trips) || '<div class="empty">Henüz tamamlanan yolculuk yok.</div>'}</div>`;
+  const saved = store.savedRoutes.some(x => x.id === t.id);
+  return `<div class="card-head"><div><p class="eyebrow">${new Date(t.endedAt).toLocaleString('tr-TR')}</p><h2>${esc(t.dest.name)}</h2></div><button class="close" data-act="allTrips" aria-label="Geri">${I.x}</button></div>
+    <div class="trip-summary"><p>${esc(t.origin.name)} → ${esc(t.dest.name)}</p><b>${G.fmtDur(t.duration)} · ${G.fmtDist(t.distance)}</b></div>
+    <div class="action-grid"><button data-act="tripGo">${I.route}<span>Tekrar git</span></button><button data-act="saveTrip">${I.star}<span>${saved ? 'Favoriden çıkar' : 'Güzergâhı kaydet'}</span></button></div>
+    <div class="section"><div class="section-head"><h3>Geçilen güzergâh</h3></div><p class="group-foot">İstemediğin yol kesiminin yanındaki düğmeyle sonraki rotalardan çıkar.</p><div class="list">${(t.segments || []).map((seg, i) => `<div class="row"><button class="row-main segment-title" data-act="showTripSeg" data-i="${i}"><span class="row-title">${esc(seg.name || 'Ara sokaklar')}</span><span class="row-sub">${G.fmtDist(seg.m)}</span></button><button class="avoid-segment" data-act="avoidTripSeg" data-i="${i}" aria-label="${esc(seg.name || 'Bu kesim')}: bu yoldan beni geçirme">${I.noentry}</button></div>`).join('') || '<div class="empty">Güzergâh detayları alınamamış.</div>'}</div></div>
+    <button class="link danger-link" data-act="deleteTrip">Bu kaydı sil</button>`;
 }
 
 function viewSearch() {
@@ -825,7 +821,7 @@ function resultsHtml(list) {
   if (list === 'error') return '<div class="list"><div class="empty">Arama yapılamadı. İnternet bağlantını kontrol et.</div></div>';
   if (Array.isArray(list)) {
     if (!list.length) return `<div class="list"><div class="empty">Sonuç bulunamadı.<br>Farklı yazmayı dene, örn. “Yeşildere Caddesi Karabağlar”.</div></div>${noKeyTip}`;
-    return `<div class="list">${list.map((p, i) => placeRow(p, 'pick', i)).join('')}</div>${noKeyTip}`;
+    return `<div class="list">${list.map((p, i) => placeRow(p, 'pick', i)).join('')}</div>${key() ? '<p class="legal">İşletme bilgileri © TomTom · OpenStreetMap</p>' : noKeyTip}`;
   }
   const quick = [];
   if (!S.pickFor) {
@@ -854,6 +850,7 @@ function viewPlace() {
       <button data-act="sharePlace">${I.share}<span>Paylaş</span></button>
     </div>
     ${p.isPoint ? `<div class="section"><div class="list plain">
+      ${S.entranceGoal?`<button class="row" data-act="saveEntrance">${esc(S.entranceGoal.name)} için giriş olarak kaydet</button>`:''}
       <button class="row danger" data-act="avoidHere"><span class="row-icon c-red">${I.noentry}</span><span class="row-main"><span class="row-title">Bu yoldan beni geçirme</span><span class="row-sub wrap">Rotalar artık bu noktadaki yolu kullanmaz</span></span></button>
     </div></div>` : ''}`;
 }
@@ -932,8 +929,8 @@ function metricsHtml(r) {
     const d = r.trafficDelay;
     cells.push(m('Trafik', d == null ? '—' : d >= 120 ? `+${Math.round(d / 60)} dk` : 'Akıcı', d >= 360 ? 'bad' : d >= 120 ? 'warn' : 'good'));
   }
-  cells.push(m('Yokuş', !a.total ? '—' : a.steep < 150 ? 'Yok' : dist(a.steep), a.steep >= 600 ? 'bad' : a.steep >= 150 ? 'warn' : 'good'));
-  cells.push(m('Bozuk yol', !a.total ? '—' : a.rough < 80 ? 'Yok' : dist(a.rough), a.rough >= 400 ? 'warn' : 'good'));
+  cells.push(m('Yokuş', !a.total || a.gradeKnown < a.total * .95 ? 'Bilinmiyor' : a.steep < 150 ? 'Az / kayıt yok' : dist(a.steep), a.steep >= 600 ? 'bad' : a.steep >= 150 ? 'warn' : 'good'));
+  cells.push(m('Bozuk yol', !a.total || a.surfaceKnown < a.total * .95 ? 'Bilinmiyor' : a.rough < 80 ? 'Kayıt yok' : dist(a.rough), a.rough >= 400 ? 'warn' : 'good'));
   if (r.mode === 'auto') {
     cells.push(m('Ara sokak', !a.total ? '—' : dist(a.small), a.small > 1500 ? 'warn' : 'good'));
     cells.push(m('Ana yol', !a.total ? '—' : `%${Math.round(((a.motorway + a.main) / a.total) * 100)}`));
@@ -958,62 +955,38 @@ function storyHtml(r) {
         ${items}
         <div class="tl-item end"><span class="tl-dot"></span><div><b>${esc(S.dest.name)}</b></div></div>
       </div>
-      <p class="story-text">${esc(G.storySpeech(st, S.dest.name))}</p>
+      <p class="story-text">${esc(routeCharacter(r))}</p><p class="story-text">${esc(G.storySpeech(st, S.dest.name))}</p>
     </div>`;
 }
 
+function trafficCaption(r) {
+  if (r.trafficCheckedAt) {
+    const delay = Math.round((r.trafficDelay || 0) / 60);
+    const when = G.fmtClock(new Date(r.trafficCheckedAt));
+    return `<div class="traffic-caption"><i></i>Canlı trafik${delay >= 1 ? ` · +${delay} dk` : ''} · ${when}</div>`;
+  }
+  return `<div class="traffic-caption unavailable">${key() ? 'Canlı trafik alınamadı · tahmini süre' : 'Tahmini süre · canlı trafik bağlı değil'}</div>`;
+}
 function viewRoutes() {
   const d = S.dest;
-  const modes = Object.entries(TRAVEL).map(([k, [label, ic]]) => `<button class="${S.travel === k ? 'on' : ''}" data-act="travel" data-v="${k}">${I[ic]}<span>${label}</span></button>`).join('');
-  let cards;
-  if (S.routeErr) cards = `<div class="list"><div class="empty">${esc(S.routeErr)}<br><br><button class="link" data-act="replan">Tekrar dene</button></div></div>`;
-  else if (!S.routes.length) cards = '<div class="skeleton" data-peek></div><div class="skeleton"></div>';
-  else {
-    const best = S.routes[0];
-    cards = S.routes.map((r, i) => {
-      const sel = i === S.sel;
-      const eta = G.fmtClock(new Date(Date.now() + rtime(r) * 1000));
-      const diff = i > 0 ? Math.round((rtime(r) - rtime(best)) / 60) : 0;
-      const via = r.story ? r.story.filter(s => s.kind === 'road').map(s => api.abbr(s.name)).filter((v, k, a) => a.indexOf(v) === k).slice(0, 3).join(' › ') : r.via;
-      const notes = routeNotes(r).map(([t, c]) => `<span class="note ${c}">${esc(t)}</span>`).join('');
-      return `<div class="route ${sel ? 'sel' : ''}" ${i === 0 ? 'data-peek' : ''}>
-        <div class="route-top" data-act="selRoute" data-i="${i}">
-          <div class="route-main">
-            <div class="rt-time">${fmtTime(rtime(r))}${diff ? `<span class="rt-diff">${diff > 0 ? '+' : ''}${diff} dk</span>` : ''}</div>
-            <div class="rt-sub">${eta} varış · ${G.fmtDist(r.lengthM)}</div>
-            ${via ? `<div class="rt-via">${esc(via)}</div>` : ''}
-            ${notes ? `<div class="notes">${notes}</div>` : ''}
-            ${r.mode === 'auto' ? routeStrip(r) : ''}
-          </div>
-          ${sel ? `<button class="go" data-act="go" data-i="${i}">GİT</button>` : ''}
-        </div>
-        ${sel ? `<div class="route-more"><button class="link" data-act="routeDetails">${S.details ? 'Detayları gizle' : 'Detaylar'}</button><button class="link" data-act="preview" data-i="${i}">Önizle</button></div>${S.details ? metricsHtml(r) : ''}` : ''}
-      </div>`;
-    }).join('');
-  }
+  let cards = '';
+  if (S.routeErr) cards = `<div class="list"><div class="empty">${esc(S.routeErr)}<br><button class="link" data-act="replan">Tekrar dene</button></div></div>`;
+  else if (!S.routes.length) cards = '<div class="skeleton"></div><div class="skeleton"></div>';
+  else cards = S.routes.map((r, i) => {
+    if (i >= 2 && !S.details && i !== S.sel) return '';
+    const sel = i === S.sel;
+    const eta = G.fmtClock(new Date(Date.now() + rtime(r) * 1000));
+    const extra = r.fastest ? 'Bulunan en hızlı rota' : `En hızlı rotadan ${r.extraSeconds < 60 ? '1 dk’dan az' : Math.round(r.extraSeconds / 60) + ' dk'} daha uzun`;
+    return `<div class="route ${sel ? 'sel' : ''}"><button class="route-top" data-act="selRoute" data-i="${i}" aria-pressed="${sel}"><div class="route-main"><div class="route-label">${r.best ? 'Rahat rota' : r.fastest ? 'En hızlı' : 'Alternatif rota'}</div><div class="rt-time">${fmtTime(rtime(r))}</div><div class="rt-sub">${G.fmtDist(r.lengthM)} · ${eta} varış</div>${sel ? `<div class="notes">${(r.reasons || []).slice(0, 2).map(t => `<span class="note">${t.includes('dönüş') ? I.route : I.road}${esc(t === 'Ana yollar ağırlıkta' ? 'Ana yollar' : t)}</span>`).join('')}</div><p class="route-compare">${extra}</p>${trafficCaption(r)}` : ''}</div><span class="route-radio">${sel ? I.check : ''}</span></button></div>`;
+  }).join('');
   const r = S.routes[S.sel];
-  let steps = '';
-  if (r) {
-    let prev = 0;
-    steps = r.maneuvers.filter(m => !m.silent).map(m => {
-      const seg = m.along - prev; prev = m.along;
-      const signs = (m.toward.length ? m.toward : m.branch).slice(0, 3).join(', ');
-      const sub = signs ? `${signs} yönü` : m.street;
-      return `<div class="row"><span class="step-icon">${G.arrowSvg(m)}</span><span class="row-main"><span class="row-title">${esc(G.action(m))}</span>${sub ? `<span class="row-sub wrap">${esc(sub)}</span>` : ''}</span><span class="row-meta">${seg > 5 ? G.fmtDist(seg) : ''}</span></div>`;
-    }).join('');
-  }
-  return `
-    <div class="card-head center">
-      <button class="circle-btn" data-act="shareEta" aria-label="Paylaş">${I.share}</button>
-      <div><h2>Rotalar</h2></div>
-      <button class="close" data-act="closeRoutes" aria-label="Kapat">${I.x}</button>
-    </div>
-    <div class="mode-seg">${modes}</div>
-    <div class="fromto"><span>Konumum</span>${I.arrowR}<b>${esc(d.name)}</b></div>
+  return `<div class="card-head route-head"><button class="circle-btn" data-act="closeRoutes" aria-label="Geri">${I.back}</button><h2>${esc(d.name)}</h2><button class="circle-btn" data-act="shareEta" aria-label="Varışı paylaş">${I.share}</button></div>
     ${cards}
-    ${r ? storyHtml(r) : ''}
+    ${r ? `<button class="btn primary start-route" data-act="go" data-i="${S.sel}">Başlat</button><div class="route-more"><button class="link" data-act="routeDetails">${S.details ? 'Detayları gizle' : 'Rota detayları'}</button><button class="link" data-act="preview" data-i="${S.sel}">Önizle</button></div>` : ''}
+    ${S.details && r ? metricsHtml(r) + storyHtml(r) : ''}
     <div class="section"><div class="section-head"><h3>Rota tercihleri</h3></div>${prefsList(S.travel)}</div>
-    ${steps ? `<div class="section"><div class="section-head"><h3>Adım adım</h3></div><div class="list plain steps">${steps}</div></div>` : ''}`;
+    <div class="mode-seg">${Object.entries(TRAVEL).map(([k, [l, ic]]) => `<button class="${S.travel === k ? 'on' : ''}" data-act="travel" data-v="${k}">${I[ic]}<span>${l}</span></button>`).join('')}</div>
+    ${S.details && r ? `<div class="section"><div class="section-head"><h3>Adım adım</h3></div><div class="list plain steps">${r.maneuvers.filter(m => !m.silent).map(m => `<div class="row"><span class="step-icon">${G.arrowSvg(m)}</span><span class="row-main"><span class="row-title">${esc(G.action(m))}</span><span class="row-sub wrap">${esc(m.street)}</span></span></div>`).join('')}</div></div>` : ''}`;
 }
 
 function viewWhere() {
@@ -1041,9 +1014,10 @@ function viewWhere() {
 }
 
 function render() {
-  const v = { home: viewHome, search: viewSearch, place: viewPlace, routes: viewRoutes, where: viewWhere, incident: viewIncident }[S.view];
+  const v = { home: viewHome, search: viewSearch, place: viewPlace, routes: viewRoutes, where: viewWhere, incident: viewIncident, history: viewHistory }[S.view];
   if (S.view === 'search' && $('q')) { $('results').innerHTML = resultsHtml(S.results); return; }
   sheet.body.innerHTML = v();
+  sheet.el.dataset.view = S.view;
   // Görünüm değiştiyse içerik yumuşakça belirsin
   if (S.lastView !== S.view) {
     S.lastView = S.view;
@@ -1058,7 +1032,7 @@ function goHome() {
   S.planAbort?.abort();
   setDest(null); setRoutesData([]); setJams([]); clearChips();
   render();
-  sheet.set('peek');
+  sheet.set('half');
 }
 
 /* ================= Arama ================= */
@@ -1085,17 +1059,20 @@ function onSearchInput(q, now = false) {
     if (!Array.isArray(S.results)) { S.results = 'loading'; render(); }
     const center = S.pos || (S.map ? { lat: S.map.getCenter().lat, lon: S.map.getCenter().lng } : IZMIR);
     try {
-      const [tt, ph] = await Promise.all([
-        key() ? traffic.search(key(), q, center, ac.signal).catch(e => { if (e.name === 'AbortError') throw e; return []; }) : [],
-        api.search(q, center, ac.signal)
-      ]);
-      let list = [...tt];
-      for (const p of ph) if (!list.some(x => x.name === p.name && near(x, p))) list.push(p);
-      if (!list.length || now) {
-        const more = await api.searchFallback(q, ac.signal).catch(() => []);
-        for (const p of more) if (!list.some(x => x.name === p.name && near(x, p))) list.push(p);
-      }
-      S.results = list.slice(0, 14); render();
+      const list = [];
+      const active = () => !ac.signal.aborted && S.view === 'search';
+      const merge = results => {
+        if (!active()) return;
+        for (const p of results) if (!list.some(x => x.name === p.name && near(x, p))) list.push(p);
+        list.sort((a, b) => Number(b.src === 'tt') - Number(a.src === 'tt'));
+        if (list.length) { S.results = list.slice(0, 14); render(); }
+      };
+      const jobs = [api.search(q, center, ac.signal).then(merge)];
+      if (key()) jobs.unshift(traffic.search(key(), q, center, ac.signal).then(merge));
+      await Promise.allSettled(jobs);
+      if (!active()) return;
+      if (!list.length || now) merge(await api.searchFallback(q, ac.signal).catch(() => []));
+      if (active()) { S.results = list.slice(0, 14); render(); }
     } catch (e) {
       if (e.name !== 'AbortError') { S.results = 'error'; render(); }
     }
@@ -1144,10 +1121,12 @@ async function openPoint(ll) {
 }
 
 /* ================= Rotalar ================= */
-function openRoutes(dest) {
+function openRoutes(dest, preferredTrip = null) {
+  roadside.close();S.originalDest={...dest};const entrance=S.travel==='auto'?store.entrances.find(e=>dist(e.goal.lon,e.goal.lat,dest.lon,dest.lat)<80):null;if(entrance)dest={...dest,...entrance.point,name:dest.name+' · araç girişi'};roadside.checkReminders(S.originalDest);
+  S.preferredTrip = preferredTrip || store.savedRoutes.find(t=>t.dest&&dist(t.dest.lon,t.dest.lat,dest.lon,dest.lat)<100&&(t.mode||'auto')===S.travel) || null;
   document.activeElement?.blur?.();
   S.dest = { name: dest.name, sub: dest.sub || '', lat: dest.lat, lon: dest.lon, kind: dest.kind || 'pin' };
-  S.view = 'routes'; S.details = false;
+  S.view = 'routes'; S.details = false; S.plannedFrom = null;
   setDest(S.dest);
   planRoutes();
   sheet.set('half');
@@ -1155,6 +1134,7 @@ function openRoutes(dest) {
 
 function friendlyErr(e) {
   const m = String(e?.message || '');
+  if(m.includes('kapalı'))return m+'. Farklı bir güzergâh gerekli.';
   if (/path|unreachable|No suitable edges|connect|distance/i.test(m)) {
     return 'Bu hedefe bu şekilde gidilebilecek bir yol bulunamadı.' + (store.avoids.length && S.travel === 'auto' ? ' Kaçındığın yollardan biri engel olabilir (Ayarlar).' : '');
   }
@@ -1162,19 +1142,21 @@ function friendlyErr(e) {
 }
 
 async function planRoutes() {
+  roadside.invalidate();
   S.planAbort?.abort();
   const ac = S.planAbort = new AbortController();
   S.routes = []; S.routeErr = null; S.sel = 0;
   render();
   setRoutesData([]); setJams([]); clearChips();
-  const from = await waitPos();
+  const from = PREVIEW ? (S.pos||await waitPos()) : await freshPosition();
   if (ac.signal.aborted) return;
   if (!from) { S.routeErr = 'Konumun alınamadı. Konum iznini kontrol et.'; render(); return; }
   try {
-    const tf = key() ? (r, signal) => traffic.routeTraffic(key(), r, signal) : null;
-    const routes = await api.planRoutes(from, S.dest, store.prefs, store.avoids, ac.signal, S.travel, tf);
+    const tf = trafficProvider();
+    const routes = await api.planRoutes(from, S.dest, store.prefs, [...store.avoids,...(S.resumeAvoids||[])], ac.signal, S.travel, tf, S.preferredTrip?.coords,S.resumeStops||[]);
+    S.resumeStops=null;
     if (ac.signal.aborted || S.view !== 'routes') return;
-    S.routes = routes;
+    S.routes = routes; S.plannedFrom = { ...from };
     render();
     sheet.set(sheet.detent === 'full' ? 'full' : 'half');
     drawRoutes();
@@ -1189,7 +1171,7 @@ async function planRoutes() {
 }
 
 function drawRoutes() {
-  const fs = S.routes.map((r, i) => line(r.coords, { i, sel: i === S.sel }));
+  const fs = S.routes.flatMap((r, i) => i >= 2 && !S.details && i !== S.sel ? [] : [line(r.coords, { i, sel: i === S.sel })]);
   fs.sort((a, b) => a.properties.sel - b.properties.sel);
   setRoutesData(fs);
   const r = S.routes[S.sel];
@@ -1207,33 +1189,52 @@ function selectRoute(i) {
 }
 
 /* ================= Navigasyon ================= */
-function startNav(i, simulate = false) {
-  const route = S.routes[i];
-  if (!route) return;
-  voice.unlock();
+async function startNav(i, simulate = false) {
+  simulate = simulate || PREVIEW;
+  let route = S.routes[i];
+  if (!route || S.starting || S.nav) return;
+  S.starting = true;
+  const button = document.querySelector('.start-route');
+  if (button) { button.disabled = true; button.textContent = 'Konum güncelleniyor…'; }
+  if (!simulate) {
+    const from = await freshPosition();
+    if (!from || S.view !== 'routes' || S.routes[i] !== route) { S.starting = false; if (button) { button.disabled = false; button.textContent = 'Başlat'; } toast('Güncel ve doğru konum bekleniyor. Tekrar dene.'); return; }
+    if (!S.plannedFrom || dist(from.lon, from.lat, S.plannedFrom.lon, S.plannedFrom.lat) > 35) {
+      const destination = S.dest;
+      try {
+        route = await api.reroute(from, destination, route, 0, store.prefs, store.avoids, trafficProvider(), undefined, route.stops || []);
+        if (S.view !== 'routes' || S.dest !== destination) { S.starting = false; return; }
+      } catch { S.starting = false; if (button) { button.disabled = false; button.textContent = 'Başlat'; } toast('Güncel konumdan rota alınamadı. Tekrar dene.'); return; }
+    }
+  }
+  S.starting = false;
   addRecent(S.dest);
-  store.activeNav = { dest: S.dest, t: Date.now() };
-  save();
+  if (!simulate) { store.activeNav = { dest: S.dest, t: Date.now() }; save(); }
   S.navRoute = route;
   S.nav = new Navigator(route);
+  replanner.cancel();camera.reset();S.tripAvoids=S.resumeAvoids||[];S.resumeAvoids=null;S.walkGoal=S.resumeWalkGoal||null;S.resumeWalkGoal=null;S.activeDwell=S.resumeDwell||null;S.resumeDwell=null;S.stops=route.stops||[];S.overview=false;S.lastDrawAlong=-1;S.buildingAlong=-1000;
+  S.rerouting = false;
   S.follow = true; S.arrowFor = -1; S.arrived = false; S.bannerFor = null;
   S.navInc = []; S.said = new Set(); S.trafRatio = route.trafficRatio || null;
   S.navCams = route.mode === 'auto' ? routeCams(route) : [];
-  S.trip = { t0: Date.now(), m: 0, last: null };
+  S.trip = { t0: Date.now(), m: 0, last: null, origin: { ...(S.pos || {}), name: S.where?.road || S.where?.hood || 'Başlangıç konumu' }, routes: [{ route, from: null, to: null }], track: [], simulated: simulate };
   S.prog = null;
   $('arrive').hidden = true;
   document.body.classList.remove('arrived');
   const eta = G.fmtClock(new Date(Date.now() + rtime(route) * 1000));
   S.navIntro = [G.storyShort(route.story), `Tahmini varış ${eta}.`].filter(Boolean).join(' ');
   document.body.classList.add('navigating');
-  for (const id of ['nav', 'nav-side', 'nav-bottom']) $(id).hidden = false;
+  for (const id of ['nav', 'nav-side', 'nav-bottom', 'speed-badge']) $(id).hidden = false;
   $('nav-recenter').hidden = true;
   $('nav-alert').hidden = true;
   $('speed-limit').hidden = true;
   closeNavMenu();
   $('nav-bottom').classList.toggle('walk', route.mode !== 'auto');
   updateMuteBtn();
-  $('nav-overview').innerHTML = I.route;
+  $('nav-overview').innerHTML = I.loc;
+  $('nav-overview').dataset.act = 'recenter';
+  $('nav-overview').setAttribute('aria-label', 'Konuma dön');
+  $('overview-icon').innerHTML = I.route;
   setPuckNav(true);
   clearChips();
   setRoutesData([line(route.coords, { i: 0, sel: true })]);
@@ -1249,7 +1250,10 @@ function startNav(i, simulate = false) {
     S.timers.push(setInterval(refreshNavTraffic, 300000));
   }
   $('nav-status').hidden = true;
+  diagnostics.start(adaptQuality);
+  S.timers.push(setInterval(navHealth,1000));
   if (simulate) {
+    fixes.reset();
     S.sim = new Simulator(route, p => { onPos(p); }, 3);
     showSimStatus();
   } else {
@@ -1264,7 +1268,7 @@ async function refreshNavIncidents() {
   const rem = sliceAlong(r.coords, r.cum, S.nav.along, Math.min(r.lengthM, S.nav.along + 60000));
   try {
     const list = await traffic.incidents(key(), traffic.bboxOf(rem, 0.004));
-    if (!S.nav) return;
+    if (!S.nav || S.navRoute !== r) return;
     S.navInc = traffic.onRoute(list.filter(i => i.cat !== 6 || i.delay >= 60), S.navRoute);
     drawIncidents();
   } catch { }
@@ -1277,7 +1281,7 @@ async function refreshNavTraffic() {
     if (!S.lastRemS) return;
     const rem = { coords: sliceAlong(r.coords, r.cum, S.nav.along, r.lengthM), time: S.lastRemS };
     const t = await traffic.routeTraffic(key(), rem);
-    if (S.nav) { S.trafRatio = t.trafficRatio; setJams(t.jams); }
+    if (S.nav && S.navRoute === r) { S.trafRatio = t.trafficRatio;Object.assign(r,t);setJams(t.jams); }
   } catch { }
 }
 
@@ -1290,6 +1294,7 @@ function showSimStatus() {
 
 function navPadding() {
   const H = window.innerHeight;
+  if(!$('roadside').hidden&&!wide()){const top=Math.ceil($('nav').getBoundingClientRect().bottom+14),bottom=Math.ceil($('roadside').getBoundingClientRect().height+28);return {top,bottom:Math.min(bottom,H-top-80),left:0,right:0};}
   if (wide()) return { top: Math.round(H * 0.38), bottom: 60, left: 440, right: 40 };
   // Araç ekranın alt üçte birinde: önündeki yol ve yaklaşan kavşaklar görünsün
   return { top: Math.round(H * 0.5), bottom: 96 + safeB(), left: 0, right: 0 };
@@ -1340,36 +1345,53 @@ function setKm(m) {
   else { $('nav-km').textContent = Math.round(m / 10) * 10; $('nav-km-u').textContent = 'm'; }
 }
 
-function navTick(p) {
+function navTick(p,processingStart=performance.now()) {
   if (!S.nav || S.arrived) return;
-  const st = S.nav.update(p);
+  const st = S.nav.update(p); S.lastState=st;
   const r = S.navRoute;
   const walk = r.mode !== 'auto';
-  const onRoute = st.snapped.d < 30;
-  const pp = onRoute ? st.snapped : p;
-  const hd = p.speed > (walk ? 0.8 : 2) && p.heading != null ? p.heading : st.routeBearing;
-  if (S.puck) { if (!S.follow) puckAt([pp.lon, pp.lat]); S.puck.setRotation(hd); }
+  const pp = st.position, hd = pp.heading;
+  S.displayPosition = pp;
+  if (S.puck) { puckAt([pp.lon, pp.lat]); S.puck.setRotation(hd); }
   // Yolculuk özeti için gerçekten gidilen mesafe
   if (S.trip) {
-    if (S.trip.last) { const d = dist(S.trip.last.lon, S.trip.last.lat, p.lon, p.lat); if (d < 300) S.trip.m += d; }
-    S.trip.last = { lon: p.lon, lat: p.lat };
+    const leg = S.trip.routes.at(-1);
+    if (st.matched && leg) { if (leg.from == null) leg.from = st.along; leg.to = st.along; }
+    if ((p.acc || 10) < 50) {
+      const last = S.trip.last, d = last ? dist(last.lon, last.lat, pp.lon, pp.lat) : 0;
+      if (!last || d > Math.max(5, (p.acc || 10) * .4)) {
+        if (last && d < 300) S.trip.m += d;
+        S.trip.last = { lon: pp.lon, lat: pp.lat };
+        S.trip.track.push([pp.lon, pp.lat]);
+        if (S.trip.track.length > 5000) S.trip.track = S.trip.track.filter((_, i) => i % 2 === 0);
+      }
+    }
   }
 
-  setRoutesData([line(sliceAlong(r.coords, r.cum, st.along, st.total), { i: 0, sel: true })]);
+  if(S.lastDrawAlong<0||Math.abs(st.along-S.lastDrawAlong)>3){
+    setRoutesData([line(sliceAlong(r.coords,r.cum,st.along,st.total),{i:0,sel:true})]);
+    S.map?.getSource('yolcu-traveled')?.setData({type:'FeatureCollection',features:st.along>2?[line(sliceAlong(r.coords,r.cum,0,st.along),{})]:[]});
+    S.lastDrawAlong=st.along;
+  }
+  if(S.mapReady&&Math.abs(st.along-S.buildingAlong)>100){setRouteBuildings(S.map,r,st.along,diagnostics.quality);S.buildingAlong=st.along;}
   if (st.upIdx !== S.arrowFor) { S.arrowFor = st.upIdx; maneuverArrow(st.up); }
-  renderBanner(st);
+  if(st.matched)renderBanner(st);else renderUncertain(st);
 
   S.lastRemS = st.remS;
-  const remS = st.remS * (S.trafRatio && !walk ? Math.min(2.5, Math.max(0.5, S.trafRatio)) : 1);
-  $('nav-eta').textContent = G.fmtClock(new Date(Date.now() + remS * 1000));
-  setDur(remS);
+  const remS = st.remS * (S.trafRatio && !walk ? S.trafRatio : 1);
+  if(S.activeDwell&&(p.speed||0)>2&&dist(p.lon,p.lat,S.activeDwell.lon,S.activeDwell.lat)>70)S.activeDwell=null;
+  const dwellSeconds=remainingDwellSeconds(S.stops,S.activeDwell);
+  S.remainingSeconds=remS+dwellSeconds;
+  $('nav-timing').textContent=r.trafficCheckedAt&&Date.now()-r.trafficCheckedAt<360000?'Canlı trafik dahil':'Tahmini süre · canlı trafik güncel değil';
+  $('nav-eta').textContent = G.fmtClock(new Date(Date.now() + (remS+dwellSeconds) * 1000));
+  setDur(remS+dwellSeconds);
   setKm(st.remM);
   const kmh = Math.round((p.speed || 0) * 3.6);
   $('speed-val').textContent = kmh;
 
   let say = st.say;
   if (say && S.navIntro) { say = `${S.navIntro} ${say}`; S.navIntro = null; }
-  const cam = store.prefs.radar ? S.navCams.find(c => c.along > st.along - 15 && c.along - st.along < 1000) : null;
+  const cam = store.prefs.radar && st.matched ? S.navCams.find(c => c.along > st.along - 15 && c.along - st.along < 1000) : null;
   let limit = st.limit;
   if (cam?.max && cam.along - st.along < 600) limit = cam.max;
   const lim = $('speed-limit');
@@ -1384,7 +1406,7 @@ function navTick(p) {
 
   // Uyarı: sadece gerektiğinde (önce yakındaki radar, sonra yoldaki olay)
   const al = $('nav-alert');
-  const inc = S.navInc.find(i => i.along > st.along - 30 && i.along - st.along < 4000);
+  const inc = st.matched ? S.navInc.find(i => i.endAlong > st.along && i.along - st.along < 4000) : null;
   if (cam) {
     const dd = Math.max(0, cam.along - st.along);
     al.hidden = false;
@@ -1392,7 +1414,7 @@ function navTick(p) {
     al.innerHTML = `<span class="na-ic">${I.camera}</span><span><b>Radar</b> · ${G.fmtDist(dd)}${cam.max ? ` · sınır ${cam.max}` : ''}</span>`;
     if (dd < 550 && !S.said.has('cam' + cam.id)) {
       S.said.add('cam' + cam.id);
-      if (store.prefs.radarSound) radar.beep(over ? 3 : 2);
+      voice.beep(over ? 3 : 2);
       const t = `Radar var${cam.max ? `, hız sınırı ${cam.max}` : ''}.`;
       say = say ? `${say} ${t}` : t;
     }
@@ -1402,58 +1424,73 @@ function navTick(p) {
     const icon = { warn: I.warn, car: I.car, cone: I.cone, closed: I.noentry }[incGlyph(inc)] || I.warn;
     al.hidden = false;
     al.className = `nav-alert m${Math.min(inc.mag, 3)}`;
-    al.innerHTML = `<span class="na-ic">${icon}</span><span><b>${esc(inc.label)}</b> · ${G.fmtDist(dd)}${dm >= 1 ? ` · +${dm} dk` : ''}</span>`;
+    al.innerHTML = `<span class="na-ic">${icon}</span><span><b>${esc(inc.label)}</b> · ${dd>0?G.fmtDist(dd):'bu kesimde'}${dm >= 1 ? ` · olay toplamı ${dm} dk` : ''}</span>`;
     if (dd < 1500 && !S.said.has('inc' + inc.id)) {
       S.said.add('inc' + inc.id);
-      if (store.prefs.radarSound) radar.beep(1);
-      const t = `Dikkat, ileride ${inc.label.toLocaleLowerCase('tr')} var${dm >= 1 ? `, yaklaşık ${dm} dakika gecikme` : ''}.`;
+      voice.beep(1);
+      const t = `Dikkat, ileride ${inc.label.toLocaleLowerCase('tr')} var${dm >= 1 ? `; olayın toplam gecikmesi ${dm} dakika, yolculuğuna etkisi farklı olabilir` : ''}.`;
       say = say ? `${say} ${t}` : t;
     }
   } else al.hidden = true;
 
-  if (say) voice.say(say);
+  if (say && document.visibilityState === 'visible') voice.say(say);
+  if(S.stops?.length){const stop=S.stops[0];if((st.along>=stop.along-25&&dist(p.lon,p.lat,stop.lon,stop.lat)<55)||st.along>stop.along+50){S.stops.shift();if(stop.dwellMinutes>0)S.activeDwell={lon:stop.lon,lat:stop.lat,until:Date.now()+stop.dwellMinutes*60000};saveActiveNav();toast('Ara durağa ulaşıldı');}}
   if (st.arrived) { arrive(); return; }
-  if (st.reroute) doReroute(p);
-  else if (!S.sim && !S.rerouting) $('nav-status').hidden = !st.offRoute;
-  if (st.offRoute && !S.sim && !S.rerouting) { const s = $('nav-status'); s.className = 'nav-status off'; s.textContent = 'Rotanın dışındasın'; delete s.dataset.act; }
+  if(st.reroute)doReroute();
+  navHealth();
 
   const nb = Math.round($('nav').getBoundingClientRect().bottom + 12);
   if (nb !== S.sideTop) { S.sideTop = nb; $('nav-side').style.top = nb + 'px'; }
 
-  if (S.follow && S.map) {
-    // Arkadan takip eden 3B kamera; hız arttıkça biraz uzaklaşır, dönüşe yaklaşınca yakınlaşır
-    let z;
-    if (walk) z = 18;
-    else z = st.distToNext < 220 ? 17.4 : p.speed > 22 ? 15.8 : p.speed > 13 ? 16.4 : 17;
-    S.map.easeTo({ center: [pp.lon, pp.lat], bearing: hd, pitch: walk ? 50 : 64, zoom: z, duration: S.sim ? 480 : 1000, easing: t => t, padding: navPadding() });
+  if(S.follow&&S.map){
+    const target=camera.target({...p,heading:hd},st,performance.now(),store.prefs.tilt);
+    S.map.stop();S.map.easeTo({center:[pp.lon,pp.lat],...target,easing:t=>t,padding:navPadding()});
   }
+  if(S.map&&!S.renderPending){S.renderPending=true;const begin=performance.now();S.map.once('render',()=>{S.renderPending=false;diagnostics.record(diagnostics.render,performance.now()-begin);});}
+  diagnostics.sampleFix(p,processingStart);
+
 }
 
-async function doReroute(p) {
-  if (S.rerouting) return;
-  S.rerouting = true;
-  const s = $('nav-status');
-  s.hidden = false; s.className = 'nav-status'; s.textContent = 'Rota yeniden hesaplanıyor…'; delete s.dataset.act;
-  try {
-    const r = await api.reroute(p, S.dest, S.navRoute, S.nav.along, store.prefs, store.avoids);
-    if (!S.nav) return;
-    S.navRoute = r;
-    S.nav.setRoute(r);
-    S.nav.started = true;
-    S.arrowFor = -1; S.bannerFor = null;
-    S.navCams = r.mode === 'auto' ? routeCams(r) : [];
-    drawRadars();
-    setJams([]);
-    if (key() && r.mode === 'auto') { refreshNavIncidents(); refreshNavTraffic(); }
-    voice.say('Rota güncellendi.');
-  } catch {
-    toast('Yeni rota alınamadı, tekrar denenecek');
-  } finally {
-    S.rerouting = false;
-    s.hidden = true;
-    if (S.sim) showSimStatus();
-  }
+function trafficProvider(){
+  if(!key())return null;
+  const provider=(r,signal)=>traffic.routeTraffic(key(),r,signal);
+  provider.checkClosures=async(routes,signal)=>{
+    try {const incidents=await traffic.incidents(key(),traffic.bboxOf(routes.flatMap(r=>r.coords),.003),signal);for(const r of routes)r.closed=traffic.onRoute(incidents.filter(i=>i.cat===8),r).length>0;}
+    catch(e){if(e.name==='AbortError')throw e;}
+  };
+  return provider;
 }
+function saveActiveNav(){if(!S.nav||S.sim)return;store.activeNav={dest:S.dest,stops:S.stops||[],walkGoal:S.walkGoal||null,activeDwell:S.activeDwell||null,tripAvoids:S.tripAvoids||[],t:Date.now()};save();}
+function renderUncertain(st){
+  S.bannerFor=null;$('nav-icon').innerHTML=I.locLine;$('nav-dist').textContent=st.offRoute?'Rota dışında':'Konum doğrulanıyor';$('nav-action').textContent=st.offRoute?'Yeni güzergâh aranıyor':'GPS ölçümü bekleniyor';$('nav-road').textContent='';$('nav-then').hidden=true;setArrowData([]);S.arrowFor=-1;
+}
+function adaptQuality(level){if(S.mapReady)setRouteBuildings(S.map,S.navRoute,S.nav?.along||0,level);}
+function navHealth(){
+  if(!S.nav)return;
+  const quality=fixes.status(),reason=!navigator.onLine?'İnternet bağlantısı bekleniyor':quality||(S.rerouting?'Rota yenileniyor':S.replanMessage||'');
+  const el=$('nav-status');el.hidden=!reason;el.textContent=reason;el.className='nav-status';
+  if(quality){$('speed-val').textContent='—';if(S.lastState)renderUncertain({...S.lastState,offRoute:false});}
+  if(S.diagnostics){const data=diagnostics.snapshot();data.fixAgeMs=S.pos?Math.max(0,Date.now()-S.pos.t):null;data.deviationMs=S.lastState?.deviationMs;data.replans=replanner.metrics.slice(-3);data.inFlight=!!replanner.controller;data.gpsWatches=S.geoWatch==null?0:1;data.navTimers=S.timers.length;$('diagnostics-data').textContent=JSON.stringify(data,null,2);}
+}
+function commitRoute(r){
+  if(!S.nav)return false;
+  const current=S.pos,probe=new Navigator(r).snap(current);
+  if(probe.d>45)return false;
+  roadside.invalidate();
+  S.navRoute=r;setDest(S.dest);S.stops=r.stops||[];S.trafRatio=r.trafficRatio||null;S.lastRemS=r.time;
+  S.trip?.routes.push({route:r,from:null,to:null});if(S.trip.routes.length>30)S.trip.routes.shift();
+  S.nav.setRoute(r);S.bannerFor=null;S.arrowFor=-1;S.lastDrawAlong=-1;S.buildingAlong=-1000;S.replanMessage='';
+  S.navCams=r.mode==='auto'?routeCams(r):[];S.navInc=[];setJams(r.jams);drawRadars();saveActiveNav();
+  if(S.sim){const factor=S.sim.factor;S.sim.stop();fixes.reset();S.sim=new Simulator(r,p=>onPos(p),factor);}
+  navTick(current);if(S.sim)S.sim.d=S.nav.along;if(key())refreshNavIncidents();return true;
+}
+const replanner=new Replanner({
+  getContext:()=>S.nav&&S.pos&&Date.now()-S.pos.t<5000&&!S.arrived?{from:{...S.pos},to:{...S.dest},route:S.navRoute,along:S.nav.along,prefs:{...store.prefs},avoids:[...structuredClone(store.avoids),...(S.tripAvoids||[])],stops:structuredClone(S.stops||[]),confirmedAt:S.lastState?.confirmedAt,deviationMs:S.lastState?.deviationMs}:null,
+  request:async(c,signal)=>{if(!navigator.onLine)throw new Error('offline');return api.reroute(c.from,c.to,c.route,c.along,c.prefs,c.avoids,trafficProvider(),signal,c.stops);},
+  commit:commitRoute,
+  status:message=>{S.rerouting=message==='Rota yenileniyor';S.replanMessage=message;navHealth();}
+});
+function doReroute(){return replanner.run('deviation');}
 
 function arrive() {
   if (S.arrived) return;
@@ -1467,11 +1504,25 @@ function arrive() {
   $('nav-alert').hidden = true;
   $('nav-prog').style.width = '100%';
   S.sim?.stop();
+  replanner.cancel();diagnostics.stop();
   closeNavMenu();
   // Varış özeti: ne zaman vardın, ne kadar sürdü, kaç km, ortalama hız
   const tr = S.trip || { t0: Date.now(), m: 0 };
-  const secs = Math.max(60, (Date.now() - tr.t0) / 1000);
-  const meters = tr.m > 200 ? tr.m : (S.navRoute?.lengthM || 0);
+  const secs = Math.max(1, (Date.now() - tr.t0) / 1000);
+  const meters = tr.m;
+  if (!tr.simulated) {
+    const compact = (coords, limit = 1200) => coords.filter((_, i) => i === 0 || i === coords.length - 1 || i % Math.max(1, Math.ceil(coords.length / limit)) === 0).map(c => c.map(v => +v.toFixed(6)));
+    const segments = (tr.routes || []).flatMap(leg => {
+      if (leg.from == null || leg.to == null) return [];
+      const r = leg.route;
+      return (r.story?.length ? r.story : [{ name: 'Güzergâh', b: 0, e: r.coords.length - 1 }]).flatMap(seg => {
+        const from = Math.max(leg.from, r.cum[seg.b]), to = Math.min(leg.to, r.cum[seg.e]);
+        return to - from < 10 ? [] : [{ name: seg.name || 'Ara sokaklar', m: to - from, coords: compact(sliceAlong(r.coords, r.cum, from, to), 120) }];
+      });
+    });
+    const completed={ mode: S.navRoute.mode, origin: tr.origin, dest: { ...S.dest }, startedAt: tr.t0, endedAt: Date.now(), duration: secs, distance: tr.m, coords: compact(tr.track), segments, id:crypto.randomUUID() };
+    addTrip(completed);S.completedTrip=completed;
+  }
   const avg = Math.round((meters / secs) * 3.6);
   const a = $('arrive');
   a.innerHTML = `
@@ -1483,6 +1534,8 @@ function arrive() {
       <div><b>${G.fmtDist(meters)}</b><small>mesafe</small></div>
       <div><b>${avg}</b><small>ort. km/sa</small></div>
     </div>
+    ${S.navRoute.mode==='auto'?`<button class="btn" data-act="openPark">Park ettim${S.walkGoal?' · yürüyüşe devam':''}</button>`:''}
+    ${!tr.simulated?`<button class="btn like-route" data-act="likeCompleted">${I.star} Bu güzergâhı beğendim</button>`:''}
     <button class="btn primary" data-act="endNav">Tamam</button>`;
   a.hidden = false;
   document.body.classList.add('arrived');
@@ -1491,12 +1544,17 @@ function arrive() {
 }
 
 function endNav() {
+  roadside.close();S.walkGoal=null;S.activeDwell=null;S.tripAvoids=[];
+  replanner.cancel();S.stopAbort?.abort();S.stopVersion=(S.stopVersion||0)+1;diagnostics.stop();camera.reset();S.stops=[];S.replanMessage='';S.rerouting=false;
+  $('diagnostics').hidden=true;
+  const simulated = !!S.sim;
   S.sim?.stop(); S.sim = null;
+  if (simulated) { S.pos = S.realPos || null;fixes.reset();if(S.pos)fixes.last=S.pos; }
   S.nav = null; S.navRoute = null; S.bannerFor = null; S.navInc = []; S.navCams = [];
   S.timers.forEach(clearInterval); S.timers = [];
   document.body.classList.remove('navigating');
   closeNavMenu();
-  for (const id of ['nav', 'nav-side', 'nav-bottom', 'nav-recenter', 'nav-street', 'sim-badge', 'arrive']) $(id).hidden = true;
+  for (const id of ['nav', 'nav-side', 'nav-bottom', 'nav-recenter', 'nav-street', 'sim-badge', 'arrive', 'speed-badge']) $(id).hidden = true;
   document.body.classList.remove('arrived');
   clearTimeout(S.arriveT);
   S.trip = null; S.arrived = false;
@@ -1504,6 +1562,7 @@ function endNav() {
   keepAwake(false);
   voice.stop();
   store.activeNav = null; save();
+  S.map?.getSource('yolcu-traveled')?.setData(EMPTY);
   setRoutesData([]); setArrowData([]); setJams([]); setDest(null);
   applyTheme();
   drawRadars();
@@ -1516,15 +1575,16 @@ function endNav() {
   renderWherePill();
   S.view = 'home'; S.dest = null; S.routes = [];
   render();
-  sheet.set('peek');
+  sheet.set('half');
   loadIncidents(true);
   S.helloAt = null; S.eta = {}; refreshHello();
 }
 
 function updateMuteBtn() {
   const b = $('nav-mute');
-  b.innerHTML = store.prefs.voice ? I.speaker : I.mute;
-  b.classList.toggle('off', !store.prefs.voice);
+  b.innerHTML = store.prefs.soundMode === 'silent' ? I.mute : I.speaker;
+  b.classList.toggle('off', store.prefs.soundMode === 'silent');
+  b.setAttribute('aria-label', 'Ses: ' + SOUND_MODES[store.prefs.soundMode]);
 }
 
 function renderNavMenu() {
@@ -1532,8 +1592,11 @@ function renderNavMenu() {
   $('nav-menu').innerHTML = `
     <div class="list">
       <button class="row" data-act="overview"><span class="row-icon">${I.route}</span><span class="row-main"><span class="row-title">Tüm rotayı gör</span></span></button>
-      <label class="row"><span class="row-icon">${I.speaker}</span><span class="row-main"><span class="row-title">Sesli yönlendirme</span></span><input type="checkbox" class="switch" data-pref="voice" ${P.voice ? 'checked' : ''}></label>
-      <label class="row"><span class="row-icon">${I.camera}</span><span class="row-main"><span class="row-title">Radar uyarı sesi</span></span><input type="checkbox" class="switch" data-pref="radarSound" ${P.radarSound ? 'checked' : ''}></label>
+      <button class="row" data-act="avoidNextTurn">${placeIcon('road')}<span class="row-main"><span class="row-title">Bu dönüşü istemiyorum</span></span></button>
+      <button class="row" data-act="openPark">${placeIcon('parking')}<span class="row-main"><span class="row-title">${S.lastState?.remM<1000?'Hedef yakınında park':'Park & araç'}</span></span></button>
+      ${(S.stops||[]).map((stop,i)=>`<button class="row" data-act="removeStop" data-i="${i}">${placeIcon(stop.kind)}<span class="row-main"><span class="row-title">${esc(stop.name)}</span><span class="row-sub">Ara durağı kaldır</span></span></button>`).join('')}
+      <button class="row" data-act="navTilt">${placeIcon('road')}<span class="row-main"><span class="row-title">${store.prefs.tilt?'2D harita':'3D harita'}</span></span></button>
+      ${soundControls()}
       <button class="row" data-act="shareEta"><span class="row-icon">${I.share}</span><span class="row-main"><span class="row-title">Varış saatini paylaş</span></span></button>
     </div>
     <button class="end-route" data-act="endNav">Rotayı Bitir</button>`;
@@ -1574,18 +1637,10 @@ function renderSettings() {
     <div class="group-title">Harita teması</div>
     <div class="segmented">${seg('auto', 'Otomatik')}${seg('light', 'Gündüz')}${seg('dark', 'Gece')}</div>
 
-    <div class="group-title">Radar</div>
-    <div class="list plain">
-      <label class="row"><span class="row-main"><span class="row-title">Radar uyarıları</span><span class="row-sub">${S.official.length ? `${S.official.length} resmi EDS noktası + çevrende ${S.cams.length} radar` : 'Radar verisi yükleniyor'}</span></span><input type="checkbox" class="switch" data-pref="radar" ${P.radar ? 'checked' : ''}></label>
-      <label class="row"><span class="row-main"><span class="row-title">Uyarı sesi</span><span class="row-sub">Sesli yönlendirme kapalıyken de kısa bir “bip”</span></span><input type="checkbox" class="switch" data-pref="radarSound" ${P.radarSound ? 'checked' : ''}></label>
-    </div>
-    <p class="group-foot">Radarlar otomatik gelir, senin bir şey eklemen gerekmez: Emniyet Genel Müdürlüğü’nün resmi EDS listesi (her hafta güncellenir) ve OpenStreetMap’teki hız kameraları. Gezici radarların yeri hiçbir yerde yayınlanmadığı için gösterilemez.</p>
-    ${oldRadars}
-
-    <div class="group-title">Sesli yönlendirme</div>
-    <div class="list plain">
-      <label class="row"><span class="row-main"><span class="row-title">Sesli yönlendirme</span><span class="row-sub">${voice.v ? esc(voice.v.name) : 'Telefonun sesi'}</span></span><input type="checkbox" class="switch" data-pref="voice" ${P.voice ? 'checked' : ''}></label>
-    </div>
+    <div class="group-title">Ses</div>
+    <div class="list plain">${soundControls()}</div>
+    <p class="group-foot">Sessiz modda ses sistemi başlatılmaz. Sesli modlarda kısa anonslar diğer seslerle karışacak şekilde istenir; son davranış iOS ve Bluetooth aygıtına bağlıdır.</p>
+    <div class="group-title">Radar</div><div class="list plain"><label class="row"><span class="row-main"><span class="row-title">Haritada radar uyarıları</span><span class="row-sub">${S.official.length} EDS · ${S.cams.length} çevredeki radar</span></span><input type="checkbox" class="switch" data-pref="radar" ${P.radar ? 'checked' : ''}></label></div>${oldRadars}
 
     <div class="group-title">Trafik ve işletme arama</div>
     <div class="list plain">
@@ -1593,7 +1648,7 @@ function renderSettings() {
         <span class="row-main"><span class="row-title">TomTom</span><span class="row-sub">${key() ? 'Bağlı · trafik, kazalar ve işletme arama açık' : 'Bağlı değil'}</span></span>
         ${key() ? `<button class="pill-btn" data-act="removeKey">Kaldır</button>` : ''}
       </div>
-      ${key() ? '' : `<div class="row" style="gap:8px"><input id="tt-key" class="text-input" placeholder="API anahtarını yapıştır" autocomplete="off" autocapitalize="off" spellcheck="false"><button class="pill-btn accent" data-act="saveKey">Kaydet</button></div>`}
+      ${key() ? '' : `<div class="row" style="gap:8px"><input id="tt-key" type="password" class="text-input" placeholder="API anahtarını yapıştır" autocomplete="off" autocapitalize="off" spellcheck="false"><button class="pill-btn accent" data-act="saveKey">Kaydet</button></div>`}
     </div>
     ${key() ? '' : `<p class="group-foot">Ücretsiz anahtar: <a href="https://developer.tomtom.com/user/register" target="_blank" rel="noopener">developer.tomtom.com</a> › hesap aç › Dashboard › Keys.</p>`}
 
@@ -1603,15 +1658,17 @@ function renderSettings() {
     <div id="icon-steps"></div>
 
     <div class="group-title">Rota tercihleri</div>
-    ${prefsList('auto')}
+    <div id="route-preferences">${prefsList('auto')}</div>
 
     <div class="group-title">Ev ve iş</div>
     <div class="list plain">${favRow('home', 'Ev', 'home')}${favRow('work', 'İş', 'work')}</div>
 
-    <div class="group-title">Kayıtlı yerler</div>
+    <div class="group-title">Yol üstü & kişisel yardım</div><div class="list plain"><button class="row" data-act="openRoadside">Yol üstü tercihleri ve ihtiyaçlar</button><button class="row" data-act="personalPlaces">Benim yerlerim & hatırlatmalar</button><button class="row" data-act="openPark">Park konumu & Arabaya dön</button><button class="row" data-act="pickEntrance" data-v="home">Ev için araç girişi kaydet</button><button class="row" data-act="pickEntrance" data-v="work">İş için araç girişi kaydet</button></div>
+    <div class="group-title">YapayZekaLab bağlantısı</div>${hasServerAPI()?'':`<p class="group-foot">${SERVER_UNAVAILABLE}</p>`}<p class="group-foot">Anahtar sunucuda saklanır. Model istekleri yalnız sen başlatınca yapılır; konum ve rota verisi modele gönderilmez.</p><div class="list plain"><button class="row" data-act="aiTest" ${hasServerAPI()?'':'disabled'}>Bağlantıyı test et</button><label class="row">Model<select id="ai-model-select" ${hasServerAPI()?'':'disabled'}><option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite</option><option value="gemini-3-flash">gemini-3-flash</option></select></label><button class="row" data-act="aiModel" ${hasServerAPI()?'':'disabled'}>Modeli uygula</button></div><p id="ai-connection-result" class="group-foot">Sunucu bağlantısı henüz test edilmedi.</p>
+    <div class="group-title">Benim yerlerim</div>
     <div class="list plain">${places}</div>
 
-    <div class="group-title">Kaçındığın yollar</div>
+    <div id="avoided-roads" class="group-title">Kaçındığın yollar</div>
     <div class="list plain">${avoids}</div>
     <p class="group-foot">Haritada bir yola basılı tut ve “Bu yoldan beni geçirme”ye dokun.</p>
 
@@ -1620,10 +1677,11 @@ function renderSettings() {
       <button class="row" data-act="backup"><span class="row-icon">${I.download}</span><span class="row-main"><span class="row-title">Yedeği indir</span></span></button>
       <button class="row" data-act="restore"><span class="row-icon">${I.upload}</span><span class="row-main"><span class="row-title">Yedekten geri yükle</span></span></button>
     </div>
-    <p class="group-foot">Tüm kişisel bilgiler sadece bu telefonda saklanır.</p>
+    <p class="group-foot">Yerler, park konumu ve tercihler bu cihazda saklanır. Modelle çözümlemeyi seçtiğinde yazdığın istek sağlayıcıya gönderilir.</p>
 
     <div class="group-title">Hakkında</div>
-    <div class="list plain"><div class="row"><span class="row-main"><span class="row-title">Yolcu</span><span class="row-sub wrap">Harita © OpenStreetMap katkıcıları, OpenFreeMap. Arazi © Mapterhorn. Uydu © Esri, Maxar. Rota: Valhalla (FOSSGIS). Arama: Photon, Nominatim${key() ? ', TomTom' : ''}. Hava: Open‑Meteo. Radar: EGM EDS Haritası, OpenStreetMap.</span></span></div></div>`;
+    <div class="list plain"><div class="row"><span class="row-main"><span class="row-title">Yolcu · ${RELEASE}</span><span class="row-sub wrap">Harita © OpenStreetMap katkıcıları, OpenFreeMap. Arazi © Mapterhorn. Uydu © Esri, Maxar. Rota: Valhalla (FOSSGIS). Arama: Photon, Nominatim${key() ? ', TomTom' : ''}. Hava: Open‑Meteo. Radar: EGM EDS Haritası, OpenStreetMap.</span></span></div></div>`;
+  roadside.assistant.status().then(data=>{if($('settings').hidden)return;if(data.hosted===false)$('ai-connection-result').textContent=data.message;const select=$('ai-model-select');if(select&&data.model){if(![...select.options].some(o=>o.value===data.model))select.add(new Option(data.model,data.model));select.value=data.model;}}).catch(()=>{});
 }
 
 function applyIconLink() {
@@ -1639,8 +1697,44 @@ function setTilt(on) {
   S.map.easeTo({ pitch: on ? 58 : 0, zoom: on ? Math.max(z, 15.8) : z, bearing: on ? S.map.getBearing() : 0, duration: 900 });
 }
 
+function soundControls() {
+  return Object.entries(SOUND_MODES).map(([mode, label]) => `<button class="row sound-option" data-act="soundMode" data-v="${mode}" aria-pressed="${store.prefs.soundMode === mode}"><span class="row-icon">${mode === 'silent' ? I.mute : mode === 'alerts' ? I.camera : I.speaker}</span><span class="row-main"><span class="row-title">${label}</span></span><span class="sound-check">${store.prefs.soundMode === mode ? I.check : ''}</span></button>`).join('');
+}
+function openTrip(t) {
+  if (!t) return;
+  S.tripView = t; S.view = 'history'; render(); sheet.set('half');
+  setRoutesData(t.coords?.length > 1 ? [line(t.coords, { sel: true })] : []);
+  if (t.coords?.length > 1) fitCoords(t.coords);
+}
 /* ================= Eylemler ================= */
 const ACT = {
+  openRoadside:()=>{closeNavMenu();$('settings').hidden=true;document.body.classList.remove('settings-open');roadside.home();},openPark:()=>{closeNavMenu();$('settings').hidden=true;document.body.classList.remove('settings-open');roadside.park();},avoidNextTurn:()=>avoidNextTurn(),
+  personalPlaces:()=>{$('settings').hidden=true;document.body.classList.remove('settings-open');roadside.places();},
+  saveEntrance:()=>{const goal=S.entranceGoal;if(!goal||!S.place)return toast('Önce girişin ait olduğu hedefi seç');store.entrances=store.entrances.filter(e=>dist(e.goal.lon,e.goal.lat,goal.lon,goal.lat)>80);store.entrances.push({goal:{...goal},point:{lon:S.place.lon,lat:S.place.lat},note:S.place.name});save();S.entranceGoal=null;render();toast('Araç girişi kaydedildi');},
+  pickEntrance:el=>{const goal=store[el.dataset.v];if(!goal)return toast('Önce bu hedefin konumunu kaydet');ACT.closeSettings();roadside.onPickEntrance(goal);},
+  aiTest:async()=>{const el=$('ai-connection-result');el.textContent='Bağlantı sınanıyor…';try{const r=await roadside.assistant.status(true);el.textContent=`${r.available?'Model erişilebilir':'Seçili model listede yok'} · ${r.model||''} · ${Math.round(r.latencyMs||0)} ms`;S.aiModels=r.models||[];const select=$('ai-model-select');if(select)select.innerHTML=S.aiModels.map(m=>`<option value="${esc(m.id)}" ${m.id===r.model?'selected':''}>${esc(m.id)}</option>`).join('');}catch{el.textContent='Sunucu bağlantısı doğrulanamadı';}},
+  aiModel:async()=>{const value=$('ai-model-select')?.value;if(!value)return;try{const r=await fetch('/api/ai/model',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:value})});const data=await r.json();$('ai-connection-result').textContent=data.message||data.error;if(r.ok){roadside.assistant.cancel();roadside.assistant.cache.clear();}}catch{$('ai-connection-result').textContent='Model değiştirilemedi';}},
+
+  removeStop:el=>{const stops=[...(S.stops||[])];stops.splice(+el.dataset.i,1);closeNavMenu();changeStops(stops);},
+  likeCompleted: el=>{if(!S.completedTrip)return;if(!store.savedRoutes.some(t=>t.id===S.completedTrip.id))toggleRouteSaved(S.completedTrip);el.textContent='Güzergâh kaydedildi';el.disabled=true;},
+  navTilt:()=>{setTilt(!store.prefs.tilt);camera.reset();closeNavMenu();if(S.pos)navTick(S.pos);},
+  routePrefs: () => { ACT.openSettings(); requestAnimationFrame(() => $('route-preferences')?.scrollIntoView({ block: 'start' })); },
+  avoidList: () => { ACT.openSettings(); requestAnimationFrame(() => $('avoided-roads')?.scrollIntoView({ block: 'start' })); },
+  allTrips: () => { S.tripView = null; S.view = 'history'; render(); sheet.set('full'); setRoutesData([]); },
+  openTrip: el => openTrip(store.trips[+el.dataset.i]),
+  openSavedRoute: el => openTrip(store.savedRoutes[+el.dataset.i]),
+  tripGo: () => { if (S.tripView) { S.travel = S.tripView.mode || 'auto'; openRoutes(S.tripView.dest, S.tripView); } },
+  saveTrip: () => { if (S.tripView) { toggleRouteSaved(S.tripView); render(); } },
+  deleteTrip: () => { if (!S.tripView) return; const id = S.tripView.id; store.trips = store.trips.filter(t => t.id !== id); store.savedRoutes = store.savedRoutes.filter(t => t.id !== id); save(); ACT.allTrips(); },
+  showTripSeg: el => { const seg = S.tripView?.segments[+el.dataset.i]; if (seg?.coords.length > 1) { setRoutesData([line(seg.coords, { sel: true })]); sheet.set('peek'); setTimeout(() => fitCoords(seg.coords), 80); } },
+  avoidTripSeg: el => {
+    const seg = S.tripView?.segments[+el.dataset.i]; if (!seg?.coords?.length) return;
+    const points = Array.from({ length: Math.min(8, seg.coords.length) }, (_, i) => seg.coords[Math.min(seg.coords.length - 1, Math.round((i + .5) * seg.coords.length / Math.min(8, seg.coords.length)))]);
+    const c = points[Math.floor(points.length / 2)];
+    store.avoids.push({ lon: c[0], lat: c[1], name: seg.name, points, t: Date.now() }); save(); toast('Yol kesimi kaçınılan yollara eklendi');
+  },
+  soundMode: el => { voice.setMode(el.dataset.v); save(); updateMuteBtn(); if (!$('settings').hidden) renderSettings(); if (!$('nav-menu').hidden) renderNavMenu(); },
+  cycleSheet: () => sheet.set(({ peek: 'half', half: 'full', full: 'peek' })[sheet.detent]),
   openSearch: () => openSearch(),
   cancelSearch: () => { document.activeElement?.blur?.(); goHome(); },
   pick: el => { const p = Array.isArray(S.results) ? S.results[+el.dataset.i] : null; if (p) choosePlace(p); },
@@ -1707,21 +1801,21 @@ const ACT = {
     const p = S.place;
     store.avoids.push({ lat: p.lat, lon: p.lon, name: p.road || p.name, sub: p.sub, t: Date.now() });
     save();
-    toast('Tamam, seni bir daha bu yoldan geçirmeyeceğim');
+    toast('Bu yol noktası sonraki rota hesaplarında dışlanacak');
     goHome();
   },
   closeRoutes: () => { S.planAbort?.abort(); S.routes = []; setRoutesData([]); setJams([]); clearChips(); if (S.place) showPlace(S.place); else goHome(); },
   replan: () => planRoutes(),
   travel: el => { if (S.travel === el.dataset.v) return; S.travel = el.dataset.v; planRoutes(); },
   selRoute: (el, e) => { if (e.target.closest('.go')) return; selectRoute(+el.dataset.i); },
-  routeDetails: () => { S.details = !S.details; const sc = sheet.body.scrollTop; render(); sheet.body.scrollTop = sc; },
+  routeDetails: () => { S.details = !S.details; const sc = sheet.body.scrollTop; render(); sheet.body.scrollTop = sc; drawRoutes(); },
   focusSeg: el => {
     const r = S.routes[S.sel]; const s = r?.story?.[+el.dataset.i]; if (!s) return;
     const c = r.coords.slice(s.b, s.e + 1);
     sheet.set('peek');
     setTimeout(() => fitCoords(c), 80);
   },
-  speakStory: () => { const r = S.routes[S.sel]; if (!r?.story) return; voice.unlock(); voice.say(G.storySpeech(r.story, S.dest.name), true); },
+  speakStory: () => { const r = S.routes[S.sel]; if (!r?.story) return; if (store.prefs.soundMode !== 'guidance') { toast('Dinlemek için Yönlendirme + uyarılar modunu seç'); return; } voice.say(G.storySpeech(r.story, S.dest.name)); },
   go: el => startNav(+el.dataset.i),
   preview: el => startNav(+el.dataset.i, true),
   endNav: () => endNav(),
@@ -1738,22 +1832,18 @@ const ACT = {
     text = text.charAt(0).toLocaleUpperCase('tr') + text.slice(1);
     try { if (navigator.share) await navigator.share({ text }); else { await navigator.clipboard.writeText(text); toast('Kopyalandı'); } } catch { }
   },
-  recenter: () => { S.follow = true; $('nav-recenter').hidden = true; if (S.pos) navTick(S.pos); },
+  recenter: () => { S.overview=false;setPuckNav(true);camera.reset(); S.follow = true; $('nav-recenter').hidden = true; if (S.pos) navTick(S.pos); },
   overview: () => {
     if (!S.navRoute) return;
     closeNavMenu();
-    S.follow = false;
+    S.follow = false;S.overview=true;setPuckNav(false);
     $('nav-recenter').hidden = false; $('nav-street').hidden = true;
     const r = S.navRoute, st = S.nav;
     const c = sliceAlong(r.coords, r.cum, st.along, r.lengthM);
     const top = $('nav').getBoundingClientRect().bottom + 20;
     fitCoords(c, { padding: { top, bottom: 130 + safeB(), left: wide() ? 460 : 36, right: 72 } });
   },
-  toggleVoice: () => {
-    store.prefs.voice = !store.prefs.voice; save(); updateMuteBtn();
-    if (!store.prefs.voice) voice.stop();
-    toast(store.prefs.voice ? 'Sesli yönlendirme açık' : 'Sesli yönlendirme kapalı', 1500);
-  },
+  toggleVoice: () => { renderNavMenu(); $('nav-menu').hidden = false; document.body.classList.add('nav-menu-open'); },
   simSpeed: () => { if (!S.sim) return; const f = [1, 3, 8]; S.sim.factor = f[(f.indexOf(S.sim.factor) + 1) % f.length]; showSimStatus(); },
   locate: () => {
     if (!S.pos) { toast('Konumun bekleniyor…'); return; }
@@ -1776,12 +1866,12 @@ const ACT = {
   resumeNav: (el, e) => {
     if (e.target.closest('[data-act=dismissResume]')) return;
     const an = store.activeNav; if (!an) return;
-    S.autoStart = true; openRoutes(an.dest);
+    S.autoStart = true; S.resumeStops=an.stops||[];S.resumeAvoids=an.tripAvoids||[];S.resumeWalkGoal=an.walkGoal||null;S.resumeDwell=an.activeDwell||null;openRoutes(an.dest);
   },
   dismissResume: (el, e) => { e.stopPropagation(); store.activeNav = null; save(); render(); },
 
-  openSettings: () => { renderSettings(); $('settings').hidden = false; $('layers').hidden = true; },
-  closeSettings: () => { $('settings').hidden = true; render(); },
+  openSettings: () => { document.body.classList.add('settings-open');renderSettings(); $('settings').hidden = false; $('layers').hidden = true; },
+  closeSettings: () => { document.body.classList.remove('settings-open');$('settings').hidden = true; render(); },
   theme: el => { store.prefs.theme = el.dataset.v; save(); applyTheme(); renderSettings(); },
   saveKey: async () => {
     const v = ($('tt-key')?.value || '').trim();
@@ -1810,7 +1900,7 @@ const ACT = {
       <small>Ev, iş, favoriler ve ayarların bağlantının içinde, yeni uygulamaya taşınır.</small>
     </div>`;
   },
-  setFav: el => { $('settings').hidden = true; S.pickFor = el.dataset.k; openSearch(); },
+  setFav: el => { document.body.classList.remove('settings-open');$('settings').hidden = true; S.pickFor = el.dataset.k; openSearch(); },
   delPlace: el => { store.places.splice(+el.dataset.i, 1); save(); renderSettings(); },
   delAvoid: el => { store.avoids.splice(+el.dataset.i, 1); save(); renderSettings(); toast('Kaldırıldı'); },
   delRadar: el => { store.radars.splice(+el.dataset.i, 1); save(); drawRadars(); renderSettings(); toast('Kaldırıldı'); },
@@ -1833,6 +1923,8 @@ async function sharePlace(p) {
   } catch { }
 }
 
+document.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('.grab-area')) { e.preventDefault(); ACT.cycleSheet(); } });
+
 document.addEventListener('click', e => {
   if (performance.now() - S.dragEnd < 350) { e.preventDefault(); e.stopPropagation(); return; }
   const el = e.target.closest('[data-act]');
@@ -1844,11 +1936,9 @@ document.addEventListener('click', e => {
 document.addEventListener('change', e => {
   const k = e.target.dataset?.pref;
   if (!k) return;
-  store.prefs[k] = e.target.checked;
+  store.prefs[k] = k === 'maxExtraMinutes' ? Number(e.target.value) : e.target.checked;
   save();
-  if (k === 'voice') { updateMuteBtn(); if (!store.prefs.voice) voice.stop(); }
-  else if (k === 'radarSound') { if (store.prefs.radarSound) { radar.unlockBeep(); radar.beep(1); } }
-  else if (k === 'traffic') { setFlow(); if (store.prefs.traffic) loadIncidents(true); else { S.incidents = []; drawIncidents(); } }
+  if (k === 'traffic') { setFlow(); if (store.prefs.traffic) loadIncidents(true); else { S.incidents = []; drawIncidents(); } }
   else if (k === 'radar') { if (store.prefs.radar && S.pos) loadRadars(S.pos); drawRadars(); }
   else if (S.view === 'routes' && S.dest && !S.nav) planRoutes();
   if (!$('settings').hidden) renderSettings();
@@ -1857,7 +1947,7 @@ document.addEventListener('change', e => {
 $('file-import').addEventListener('change', async e => {
   const f = e.target.files?.[0];
   if (!f) return;
-  try { importBackup(await f.text()); toast('Yedek geri yüklendi'); applyTheme(); renderSettings(); render(); }
+  try { importBackup(await f.text()); voice.setMode(store.prefs.soundMode); toast('Yedek geri yüklendi'); applyTheme(); renderSettings(); render(); }
   catch (err) { toast(err.message || 'Yedek okunamadı'); }
   e.target.value = '';
 });
@@ -1879,6 +1969,7 @@ function readUrl() {
 }
 
 function boot() {
+  if (PREVIEW) { store.prefs.theme = 'light'; store.prefs.soundMode = 'silent'; store.activeNav = null; }
   readUrl();
   applyIconLink();
   applyTheme();
@@ -1887,11 +1978,13 @@ function boot() {
   $('btn-3d').classList.toggle('on', !!store.prefs.tilt);
   sheet.init();
   render();
-  requestAnimationFrame(() => sheet.set('peek', false));
+  requestAnimationFrame(() => sheet.set('half', false));
   setTimeout(() => { fitScreen(); sheet.set(sheet.detent, false); }, 400);
   voice.init();
   initMap();
-  startGeo();
+  if(new URLSearchParams(location.search).get('diagnostics')==='1'){S.diagnostics=true;$('diagnostics').hidden=false;}
+  if (PREVIEW) onPos({ lon: 27.1045, lat: 38.3695, acc: 8, speed: 0, heading: null, t: Date.now() });
+  else startGeo();
   setInterval(() => {
     checkTheme();
     if (S.view === 'home' && !S.nav) { refreshHello(); if (sheet.detent === 'peek') { const sc = sheet.body.scrollTop; render(); sheet.body.scrollTop = sc; } }
@@ -1903,4 +1996,17 @@ function boot() {
 boot();
 
 // Geliştirme ve test için
-window.__yolcu = { S, store, onPos, startNav, sheet };
+window.__yolcu = { S, store, onPos, replayPos:p=>onPos(p,true), startNav, sheet, diagnostics, fixes, replanner, endNav, navTick, roadside };
+
+function previewScreen(screen){
+  if(!S.mapReady){S.pendingPreview=screen;return;}
+  if(S.nav)endNav();
+  store.prefs.theme=screen==='drive'?'dark':'light';applyTheme();
+  if(screen==='home'){goHome();if(S.pos)introFly(S.pos);}
+  else{S.autoStart=screen==='drive';openRoutes({name:'Bornova',lat:38.4599,lon:27.2215,kind:'work'});}
+}
+if(PREVIEW)addEventListener('message',e=>{
+  if(e.origin!==location.origin||e.source!==parent||e.data?.type!=='yolcu-preview')return;
+  if(e.data.screen==='diagnostics'){S.diagnostics=!S.diagnostics;$('diagnostics').hidden=!S.diagnostics;navHealth();return;}
+  if(['home','routes','drive'].includes(e.data.screen))previewScreen(e.data.screen);
+});

@@ -1,5 +1,5 @@
 // Ücretsiz servisler: Valhalla (rota), Photon + Nominatim (arama / adres)
-import { decode6, cumulative, sameRoute, pointAt } from './geo.js';
+import { decode6, cumulative, sameRoute, pointAt, sliceAlong } from './geo.js';
 import { story } from './guide.js';
 
 const VALHALLA = 'https://valhalla1.openstreetmap.de';
@@ -8,6 +8,8 @@ const NOMINATIM = 'https://nominatim.openstreetmap.org';
 const TR_BBOX = '25.5,35.7,45.0,42.2';
 
 async function vpost(path, body, signal) {
+  const timeout = AbortSignal.timeout(25000);
+  signal = signal ? AbortSignal.any([signal, timeout]) : timeout;
   // text/plain => tarayıcı ön kontrol (preflight) isteği yapmaz, daha hızlı
   const r = await fetch(VALHALLA + path, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify(body), signal });
   const j = await r.json().catch(() => ({}));
@@ -89,7 +91,7 @@ export async function reverse(lat, lon, signal) {
 
 function costing(prefs, mode) {
   const base = {
-    exclude_unpaved: true,              // toprak / stabilize yola asla
+    exclude_unpaved: !!prefs.rough,              // toprak / stabilize yola asla
     use_tolls: prefs.tolls ? 0 : 0.5,
     use_tracks: 0,
     use_living_streets: 0.1
@@ -130,9 +132,9 @@ function buildRequest(locations, prefs, avoids, mode, alternates, travel = 'auto
     costing: c.name,
     costing_options: { [c.name]: c.opts },
     directions_options: { units: 'kilometers', language: 'tr-TR' },
-    alternates
+    alternates:locations.length>2?0:alternates
   };
-  if (avoids && avoids.length) body.exclude_locations = avoids.map(a => ({ lat: a.lat, lon: a.lon }));
+  if (avoids?.length) body.exclude_locations = avoids.flatMap(a => a.points?.length ? a.points.map(c => ({ lon: c[0], lat: c[1] })) : [{ lat: a.lat, lon: a.lon }]);
   return body;
 }
 
@@ -141,7 +143,7 @@ const SILENT = new Set([27]); // döner kavşaktan çıkış: girişte zaten sö
 function tripToRoute(trip, travel = 'auto') {
   const coords = [];
   const maneuvers = [];
-  let offset = 0;
+  const legEnds = [], legTimes = [];let elapsed=0;
   for (const leg of trip.legs) {
     const shape = decode6(leg.shape);
     if (coords.length) shape.shift();
@@ -167,13 +169,13 @@ function tripToRoute(trip, travel = 'auto') {
         silent: SILENT.has(m.type)
       });
     }
-    offset += leg.shape.length;
+    legEnds.push(coords.length-1);elapsed+=leg.summary?.time||0;legTimes.push(elapsed);
   }
   const cum = cumulative(coords);
   for (const m of maneuvers) m.along = cum[Math.min(m.begin, cum.length - 1)];
   return {
     mode: travel,
-    coords, cum, maneuvers,
+    coords, cum, maneuvers, legTimes, legEnds: legEnds.map(i=>cum[i]),
     lengthM: cum[cum.length - 1],
     time: trip.summary.time,
     hasToll: trip.summary.has_toll,
@@ -196,25 +198,28 @@ export async function analyze(route, signal) {
     costing: route.mode || 'auto',
     filters: {
       attributes: ['edge.speed_limit', 'edge.names', 'edge.road_class', 'edge.begin_shape_index', 'edge.end_shape_index',
-        'edge.surface', 'edge.length', 'edge.max_upward_grade', 'edge.max_downward_grade', 'edge.weighted_grade', 'edge.use'],
+        'edge.surface', 'edge.length', 'edge.max_upward_grade', 'edge.max_downward_grade', 'edge.weighted_grade', 'edge.mean_elevation', 'edge.bridge', 'edge.tunnel', 'edge.use'],
       action: 'include'
     }
   }, signal);
-  const st = { total: 0, motorway: 0, main: 0, small: 0, rough: 0, steep: 0, steps: 0, names: {}, edges: [] };
+  const st = { gradeKnown: 0, surfaceKnown: 0, total: 0, motorway: 0, main: 0, small: 0, rough: 0, steep: 0, steps: 0, names: {}, edges: [] };
   for (const e of j.edges || []) {
     const m = (e.length || 0) * 1000;
     st.total += m;
     if (e.road_class === 'motorway' || e.road_class === 'trunk') st.motorway += m;
     else if (e.road_class === 'primary' || e.road_class === 'secondary') st.main += m;
     else if (SMALL.has(e.road_class)) st.small += m;
-    if (e.surface && !GOOD_SURFACE.has(e.surface)) st.rough += m;
-    // weighted_grade: parçanın ortalama eğimi (%). Uç değerler gürültülü olduğundan sadece bunu kullan
-    const g = Math.abs(e.weighted_grade || 0);
-    if (g >= 7 && m > 15) st.steep += g >= 10 ? m * 1.5 : m;
+    if (e.surface) { st.surfaceKnown += m; if (!GOOD_SURFACE.has(e.surface)) st.rough += m; }
+    // weighted_grade is an energy factor, not a percentage. Use documented maximum slopes.
+    const up=e.max_upward_grade,down=e.max_downward_grade;
+    const gradeKnown=Number.isFinite(up)&&Number.isFinite(down)&&Math.abs(up)<1000&&Math.abs(down)<1000;
+    const g=gradeKnown?Math.max(Math.abs(up),Math.abs(down)):null;
+    if(gradeKnown)st.gradeKnown+=m;
+    if(g>=7&&m>15)st.steep+=m;
     if (e.use === 'steps') st.steps++;
     const nm = (e.names || [])[0];
     if (nm) st.names[nm] = (st.names[nm] || 0) + m;
-    st.edges.push({ b: e.begin_shape_index, e: e.end_shape_index, limit: e.speed_limit || 0, name: nm || '', names: e.names || [], cls: e.road_class });
+    st.edges.push({ b: e.begin_shape_index, e: e.end_shape_index, limit: e.speed_limit || 0, name: nm || '', names: e.names || [], cls: e.road_class, surface: e.surface || null, grade:g, elevation:Number.isFinite(e.mean_elevation)&&Math.abs(e.mean_elevation)<10000?e.mean_elevation:null, bridge:!!e.bridge, tunnel:!!e.tunnel });
   }
   return st;
 }
@@ -246,10 +251,8 @@ function describe(r) {
   if (a) {
     const top = Object.entries(a.names).filter(([, m]) => m > 600).sort((x, y) => y[1] - x[1]).slice(0, 2).map(([n]) => abbr(n));
     r.via = top.length ? top.join(' · ') + ' üzerinden' : '';
-    if (a.steep < 150) tags.push({ t: 'Yokuş yok', c: 'good' });
-    else tags.push({ t: `${Math.round(a.steep / 50) * 50} m dik yokuş`, c: a.steep > 600 ? 'bad' : 'warn' });
-    if (a.rough < 80) tags.push({ t: 'Yol düzgün', c: 'good' });
-    else tags.push({ t: `${Math.round(a.rough / 50) * 50} m bozuk yol`, c: a.rough > 400 ? 'bad' : 'warn' });
+    if (a.steep >= 150) tags.push({ t: `${Math.round(a.steep / 50) * 50} m dik yokuş`, c: a.steep > 600 ? 'bad' : 'warn' });
+    if (a.rough >= 80) tags.push({ t: `${Math.round(a.rough / 50) * 50} m bozuk yol`, c: a.rough > 400 ? 'bad' : 'warn' });
     if (r.mode === 'pedestrian' && a.steps) tags.push({ t: 'Merdiven var', c: 'warn' });
     if (r.mode === 'auto' && a.total > 0 && (a.motorway + a.main) / a.total > 0.6) tags.push({ t: 'Ana yol ağırlıklı', c: 'good' });
     if (r.mode === 'auto' && a.small > 1500) tags.push({ t: `${(a.small / 1000).toFixed(1).replace('.', ',')} km ara sokak`, c: 'warn' });
@@ -266,65 +269,88 @@ function describe(r) {
 }
 
 // Ana fonksiyon: birkaç farklı rota iste, hepsini incele, en rahatını öner
-export async function planRoutes(from, to, prefs, avoids, signal, travel = 'auto', traffic = null) {
-  const locations = [loc(from), loc(to)];
+export async function planRoutes(from, to, prefs, avoids, signal, travel = 'auto', traffic = null, preferredCoords = null, stops = []) {
+  const locations = [loc(from), ...stops.map(p=>loc(p,{type:'break'})), loc(to)];
   const ex = travel === 'auto' ? avoids : [];
   const reqs = travel === 'auto'
     ? [vpost('/route', buildRequest(locations, prefs, ex, 'comfort', 2), signal), vpost('/route', buildRequest(locations, prefs, ex, 'fast', 2), signal)]
     : [vpost('/route', buildRequest(locations, prefs, ex, 'main', 2, travel), signal), vpost('/route', buildRequest(locations, prefs, ex, 'alt', 1, travel), signal)];
+  if (preferredCoords?.length > 2 && !stops.length) {
+    let closest = 0, distance = Infinity;
+    preferredCoords.forEach((c, i) => { const d = Math.hypot(c[0] - from.lon, c[1] - from.lat); if (d < distance) { closest = i; distance = d; } });
+    const remaining = preferredCoords.slice(closest);
+    const via = [.35, .7].map(f => remaining[Math.floor((remaining.length - 1) * f)]).filter(Boolean).map(c => ({ lon: c[0], lat: c[1], type: 'through' }));
+    reqs.push(vpost('/route', buildRequest([loc(from), ...via, loc(to)], prefs, ex, travel === 'auto' ? 'comfort' : 'main', 0, travel), signal));
+  }
   const results = await Promise.allSettled(reqs);
   const trips = [];
-  for (const res of results) {
-    if (res.status !== 'fulfilled') continue;
-    trips.push(res.value.trip, ...(res.value.alternates || []).map(a => a.trip));
-  }
+  results.forEach((res,index)=> {
+    if(res.status!=='fulfilled')return;
+    for(const trip of [res.value.trip,...(res.value.alternates||[]).map(a=>a.trip)]) trips.push({trip,remembered:!!preferredCoords?.length&&!stops.length&&index===reqs.length-1&&reqs.length>2});
+  });
   if (!trips.length) {
     const err = results.find(r => r.status === 'rejected');
     throw err ? err.reason : new Error('Rota bulunamadı');
   }
   const routes = [];
-  for (const t of trips) {
-    const r = tripToRoute(t, travel);
-    if (!routes.some(x => sameRoute(x, r))) routes.push(r);
-    if (routes.length >= 4) break;
+  for (const {trip,remembered} of trips) {
+    const r = tripToRoute(trip, travel); r.remembered=remembered; r.stops=stops.map((p,i)=>({...p,along:r.legEnds[i]}));
+    const duplicate=routes.find(x=>sameRoute(x,r));
+    if(!duplicate)routes.push(r);else if(remembered)duplicate.remembered=true;
+    if (routes.length >= 8) break;
   }
   await Promise.all(routes.map(async r => {
     try { r.stats = await analyze(r, signal); } catch (e) { if (e.name === 'AbortError') throw e; r.stats = null; }
     // Trafik (TomTom anahtarı varsa): gerçek süre, gecikme ve sıkışık bölümler
     if (traffic && travel === 'auto') {
-      try { Object.assign(r, await traffic(r, signal)); } catch (e) { if (e.name === 'AbortError') throw e; }
+      try { Object.assign(r, await traffic(r, signal)); } catch (e) { if (e.name === 'AbortError') throw e; r.trafficUnavailable = true; }
     }
   }));
-  routes.forEach(r => { scoreRoute(r, prefs); describe(r); r.story = story(r); });
+  if(traffic?.checkClosures)await traffic.checkClosures(routes,signal);
+  const available=routes.filter(r=>!r.closed);
+  if(!available.length)throw new Error('Bulunan güzergâhlar kapalı yoldan geçiyor');
+  available.forEach(r => { scoreRoute(r, prefs); describe(r); r.story = story(r); });
+  return rankRoutes(available, prefs);
+}
+
+export function rankRoutes(routes, prefs) {
+  // A comparison cannot mix live TomTom timings with a different engine's base times.
+  if (routes.some(r => r.trafficUnavailable) && routes.some(r => r.trafficCheckedAt)) {
+    for (const r of routes) {
+      for (const k of ['trafficTime', 'trafficDelay', 'trafficRatio', 'trafficCheckedAt', 'trafficLengthM', 'jams']) delete r[k];
+      r.trafficUnavailable = true;
+    }
+  }
   const tt = r => r.trafficTime || r.time;
-  const fastest = routes.reduce((a, b) => (tt(b) < tt(a) ? b : a));
-  routes.sort((a, b) => a.score - b.score);
-  routes[0].best = true;
-  fastest.fastest = true;
+  const fastest = routes.reduce((a, b) => tt(b) < tt(a) ? b : a);
+  const budget = Math.max(0, Math.min(20, Number(prefs.maxExtraMinutes) || 0)) * 60;
+  routes.forEach(r => { scoreRoute(r, prefs); delete r.best; delete r.fastest; });
+  const eligible = routes.filter(r => tt(r) <= tt(fastest) + budget);
+  eligible.sort((a,b)=>{
+    const A=a.stats,B=b.stats;
+    const equivalent=Math.abs(tt(a)-tt(b))<=60&&Math.abs(a.turns-b.turns)<=1&&A?.total>0&&B?.total>0&&Math.abs((A.motorway+A.main)/A.total-(B.motorway+B.main)/B.total)<.04&&Math.abs(A.small-B.small)<200&&Math.abs(A.steep-B.steep)<75&&Math.abs(A.rough-B.rough)<75;
+    if(equivalent&&Math.abs(a.lengthM-b.lengthM)>100)return a.lengthM-b.lengthM;
+    return (a.score-(a.remembered?20:0))-(b.score-(b.remembered?20:0))||a.lengthM-b.lengthM;
+  });
+  const best = eligible[0];
+  routes.sort((a, b) => (a === best ? -1 : b === best ? 1 : tt(a) - tt(b)));
+  best.best = true; fastest.fastest = true;
+  for (const r of routes) {
+    r.extraSeconds = Math.max(0, tt(r) - tt(fastest));
+    r.reasons = r.remembered ? ['Beğendiğin güzergâh'] : [];
+    if (r.stats?.total > 0 && (r.stats.motorway + r.stats.main) / r.stats.total > .6) r.reasons.push('Ana yollar ağırlıkta');
+    if (r !== fastest && r.turns < fastest.turns) r.reasons.push('Daha az dönüş');
+    if (r.stats?.small < fastest.stats?.small - 100) r.reasons.push('Daha az ara sokak');
+    if (prefs.hills && r.stats?.gradeKnown > .95 * r.stats?.total && fastest.stats?.gradeKnown > .95 * fastest.stats?.total && r.stats.steep < fastest.stats.steep - 100) r.reasons.push('Daha az dik yokuş');
+  }
   return routes;
 }
 
-// Rotadan çıkınca: önce eski rotaya geri bağlanmayı dene, çok uzarsa yeni rota
-export async function reroute(from, to, oldRoute, along, prefs, avoids) {
-  const travel = oldRoute.mode || 'auto';
-  const v = travel === 'auto' ? 'comfort' : 'main';
-  if (travel !== 'auto') avoids = [];
-  const fresh = vpost('/route', buildRequest([loc(from), loc(to)], prefs, avoids, v, 0, travel));
-  let rejoin = null;
-  const target = along + 700;
-  if (target < oldRoute.lengthM - 300) {
-    const p = pointAt(oldRoute.coords, oldRoute.cum, target);
-    rejoin = vpost('/route', buildRequest([loc(from), { lat: p.lat, lon: p.lon, type: 'through' }, loc(to)], prefs, avoids, v, 0, travel));
-  }
-  const [f, r] = await Promise.allSettled([fresh, rejoin || Promise.reject(new Error('yok'))]);
-  const F = f.status === 'fulfilled' ? tripToRoute(f.value.trip, travel) : null;
-  const J = r.status === 'fulfilled' ? tripToRoute(r.value.trip, travel) : null;
-  let pick = F;
-  if (J && (!F || J.time <= F.time + 180)) pick = J;
-  if (!pick) throw (f.reason || new Error('Rota bulunamadı'));
-  try { pick.stats = await analyze(pick); } catch { pick.stats = null; }
-  pick.story = story(pick);
-  return pick;
+// Replanning uses the very same alternatives, analysis and extra-time ceiling.
+// The old corridor is a candidate, never an unconditional three-minute detour.
+export async function reroute(from, to, oldRoute, along, prefs, avoids, traffic = null, signal, stops = []) {
+  const routes=await planRoutes(from,to,prefs,avoids,signal,oldRoute.mode||'auto',traffic,oldRoute.remembered?sliceAlong(oldRoute.coords,oldRoute.cum,Math.min(oldRoute.lengthM,along+150),oldRoute.lengthM):null,stops);
+  return routes[0];
 }
 
 /* ---------------- Hava durumu (Open-Meteo, anahtarsız) ---------------- */
@@ -374,6 +400,6 @@ export async function nearby(cat, near, signal) {
     const lat = e.lat ?? e.center?.lat, lon = e.lon ?? e.center?.lon;
     const street = [t['addr:street'], t['addr:housenumber']].filter(Boolean).join(' No:');
     const sub = [t.brand && t.brand !== t.name ? t.brand : null, street, t['addr:suburb'] || t['addr:district']].filter(Boolean).join(', ');
-    return { name: t.name || t.brand || cat.fallback, sub, lat, lon, kind: cat.kind };
+    return { name: t.name || t.brand || cat.fallback, sub, lat, lon, kind: cat.kind, brand:t.brand||'',phone:t.phone||t['contact:phone']||'',openingText:t.opening_hours||'', diesel:t['fuel:diesel']==='yes'?true:t['fuel:diesel']==='no'?false:null };
   }).filter(p => p.lat != null);
 }

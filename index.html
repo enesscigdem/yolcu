@@ -38,7 +38,7 @@
 
   <!-- Alt panel -->
   <section id="sheet" class="sheet" data-detent="peek">
-    <div class="grab-area"><div class="grabber"></div></div>
+    <div class="grab-area" role="button" tabindex="0" aria-label="Paneli genişlet veya daralt" data-act="cycleSheet"><div class="grabber"></div></div>
     <div id="sheet-body" class="sheet-body"></div>
   </section>
 
@@ -75,16 +75,19 @@
   <div id="nav-street" class="street-pill" hidden></div>
 
   <div id="nav-bottom" class="nav-bottom" hidden>
-    <div class="grabber"></div>
-    <button class="nav-stats" data-act="toggleNavMenu" aria-label="Seçenekler">
-      <span class="stat speed"><span id="speed-limit" class="limit" hidden></span><span><b id="speed-val">0</b><small>km/sa</small></span></span>
-      <span class="stat eta"><b id="nav-eta">--:--</b><small>varış</small></span>
-      <span class="stat"><b id="nav-rem">--</b><small id="nav-rem-u">dk</small></span>
-      <span class="stat"><b id="nav-km">--</b><small id="nav-km-u">km</small></span>
-    </button>
+    <div class="drive-summary">
+      <div class="drive-time"><b id="nav-rem">--</b> <span id="nav-rem-u">dk</span></div>
+      <div class="drive-detail"><span id="nav-eta">--:--</span> varış · <span id="nav-km">--</span> <span id="nav-km-u">km</span></div><div id="nav-timing" class="nav-timing"></div>
+      <button class="overview-action" data-act="openRoadside" aria-label="Yol üstü"><span id="overview-icon"></span><small>Yol üstü</small></button>
+      <button class="more-action" data-act="toggleNavMenu" aria-label="Sürüş seçenekleri">•••</button>
+    </div>
     <div id="nav-menu" class="nav-menu" hidden></div>
   </div>
 
+  <div id="speed-badge" class="speed-badge" hidden><span id="speed-limit" class="limit" hidden></span><b id="speed-val">0</b><small>km/sa</small></div>
+
+  <section id="roadside" class="roadside" hidden role="dialog" aria-label="Yol üstü"></section>
+  <aside id="diagnostics" class="diagnostics" hidden><b>Tanılama · simülasyon / tarayıcı</b><pre id="diagnostics-data"></pre></aside>
   <!-- Ayarlar -->
   <div id="settings" class="page" hidden>
     <div class="page-head">

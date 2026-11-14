@@ -95,3 +95,9 @@ export function compass(b) {
   const names = ['Kuzey', 'Kuzeydoğu', 'Doğu', 'Güneydoğu', 'Güney', 'Güneybatı', 'Batı', 'Kuzeybatı'];
   return names[Math.round(((b % 360) + 360) % 360 / 45) % 8];
 }
+
+// Some WebKit geolocation providers expose epoch microseconds; all consumers use ms.
+export function fixTimestamp(value, now = Date.now()) {
+  if (!Number.isFinite(value) || value <= 0) return now;
+  return value > now * 100 ? Math.round(value / 1000) : value;
+}

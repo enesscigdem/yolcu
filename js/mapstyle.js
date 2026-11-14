@@ -1,3 +1,4 @@
+import { pointAt } from './geo.js';
 // Harita görünümü: OpenFreeMap "liberty" stilini doğal, sakin renklere boyar;
 // arazi gölgesi, 3B arazi, ışıklı 3B binalar, gökyüzü, uydu katmanı ekler.
 // Not: MapLibre bina dokusu (cephe/pencere) ve gerçek gölge düşürmeyi desteklemez;
@@ -6,31 +7,31 @@ const STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty';
 const DEM_URL = 'https://tiles.mapterhorn.com/{z}/{x}/{y}.webp';
 const SAT_URL = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
 
-export const ACCENT = '#2FC2B2';
+export const ACCENT = '#C95D36';
 
 export const PALETTES = {
   light: {
-    land: '#EFEDE8', residential: '#ECEAE4', park: '#D3E3C4', wood: '#C3D9B2', water: '#A9CDE6', sand: '#EDE5CF', ice: '#FFFFFF',
-    building: '#E2DFD8', building3d: '#F3F1ED', building3dTall: '#DAD6CE', hospital: '#F0E1DF', school: '#ECE6D8', aeroway: '#E6E3DC',
+    land: '#E6E1D7', residential: '#E1DCD2', park: '#C5D0B2', wood: '#B5C3A2', water: '#A9CDE6', sand: '#EDE5CF', ice: '#FFFFFF',
+    building: '#CEC7BA', building3d: '#DDD7CB', building3dTall: '#BFB8AB', hospital: '#F0E1DF', school: '#ECE6D8', aeroway: '#E6E3DC',
     // Binalar arasında çok hafif ton farkı (hepsi aynı kutu gibi durmasın)
-    bTones: ['#F4F2EE', '#EEEBE5', '#F1EDE6'], poiBg: '#FFFFFF', poiFg: '#4A4A4F',
+    bTones: ['#DED8CC', '#D3CDBF', '#DAD2C4'], poiBg: '#FFFFFF', poiFg: '#4A4A4F',
     motorway: '#F6E2B8', motorwayCase: '#D7B87A', primary: '#FFFFFF', primaryCase: '#CFC9BE',
     secondary: '#FFFFFF', secondaryCase: '#D7D2C9', minor: '#FFFFFF', minorCase: '#DFDAD2', path: '#E3DED4', rail: '#CFCAC0',
-    navRoad: '#A9A9AE', navRoadCase: '#E3E3E6', navMotorway: '#BDBDC2',
+    navRoad: '#FFFFFF', navRoadCase: '#D6D0C6', navMotorway: '#F4DFB5',
     label: '#2E2E31', district: '#86868B', roadLabel: '#58585D', waterLabel: '#4A7FA8', poiLabel: '#6C6C71', halo: '#FFFFFF', boundary: '#C5C0CF',
-    route: '#14A596', routeCase: '#0B6B62', alt: '#9FB9B5', altCase: '#6F8C88', arrow: '#FFFFFF', arrowCase: '#1C1D20',
+    route: '#CE653C', routeCase: '#A44B2B', alt: '#AAA8A5', altCase: '#878580', arrow: '#FFFFFF', arrowCase: '#1C1D20',
     shade: '#47523F', highlight: '#FFFFFF', shadeK: 0.45,
-    sky: '#C9DCEB', horizon: '#F2F1EC', fog: '#EFEDE8', light: 0.5
+    sky: '#C9DCEB', horizon: '#F2F1EC', fog: '#EFEDE8', light: 0.42
   },
   dark: {
-    land: '#1A1B1E', residential: '#1E1F22', park: '#1B2820', wood: '#19261E', water: '#0F2234', sand: '#2B2A25', ice: '#34363B',
-    building: '#25272B', building3d: '#2E323A', building3dTall: '#434956', hospital: '#2D2427', school: '#2A2925', aeroway: '#24252A',
-    bTones: ['#2E323A', '#2A2E35', '#33373F'], poiBg: '#26282D', poiFg: '#C9C9CE',
+    land: '#252729', residential: '#292B2D', park: '#1B2820', wood: '#19261E', water: '#0F2234', sand: '#2B2A25', ice: '#34363B',
+    building: '#25272B', building3d: '#3E4144', building3dTall: '#505356', hospital: '#2D2427', school: '#2A2925', aeroway: '#24252A',
+    bTones: ['#34383B', '#303437', '#3B3F42'], poiBg: '#26282D', poiFg: '#C9C9CE',
     motorway: '#4A4436', motorwayCase: '#2E2A21', primary: '#3A3C42', primaryCase: '#242529',
     secondary: '#34363B', secondaryCase: '#222326', minor: '#2E3035', minorCase: '#1F2023', path: '#2A2B2F', rail: '#2E3034',
-    navRoad: '#4A4D55', navRoadCase: '#26272B', navMotorway: '#5A5E66',
+    navRoad: '#535659', navRoadCase: '#303235', navMotorway: '#676B6E',
     label: '#E6E6E8', district: '#8E8E93', roadLabel: '#A3A3A8', waterLabel: '#6E93B5', poiLabel: '#9A9A9F', halo: '#141517', boundary: '#4C4A55',
-    route: '#2FC2B2', routeCase: '#0E5A53', alt: '#4E6662', altCase: '#2C3B39', arrow: '#FFFFFF', arrowCase: '#000000',
+    route: '#DF7748', routeCase: '#9C472A', alt: '#777A7D', altCase: '#45484B', arrow: '#FFFFFF', arrowCase: '#000000',
     shade: '#050608', highlight: '#3C4048', shadeK: 0.5,
     sky: '#121418', horizon: '#26282D', fog: '#1A1B1E', light: 0.4
   }
@@ -58,7 +59,10 @@ export async function loadStyle() {
       }
     }
     if (l.id === 'building') l.minzoom = 14;
-    if (l.id === 'building-3d') l.minzoom = 15.3;
+    if (l.id === 'building-3d') l.minzoom = 14;
+    if(l.type==='symbol') { l.paint ||= {}; l.paint['text-opacity-transition']={duration:450}; }
+    if (l['source-layer'] === 'transportation_name' && /path/.test(l.id)) l.minzoom = 16;
+    if (l['source-layer'] === 'place' && /other|village/.test(l.id)) l.minzoom = 13;
   }
   // Hazır renkli mekan ikonlarını kaldır; yerine sade, tek renkli kendi katmanımız (işe yarayan türler)
   style.layers = style.layers.filter(l => l['source-layer'] !== 'poi');
@@ -141,10 +145,11 @@ export function applyPalette(map, P, opts = {}) {
       const h = ['coalesce', ['get', 'render_height'], 0];
       const tone = ['match', ['%', ['round', h], 3], 0, P.bTones[0], 1, P.bTones[1], P.bTones[2]];
       set(id, 'fill-extrusion-color', ['interpolate', ['linear'], h, 0, tone, 20, tone, 60, P.building3dTall]);
-      set(id, 'fill-extrusion-opacity', ['interpolate', ['linear'], ['zoom'], 15.3, 0, 16, 0.96]);
+      set(id, 'fill-extrusion-opacity', nav ? .86 : .94);
+      set(id, 'fill-extrusion-height-transition', {duration:650});
       set(id, 'fill-extrusion-vertical-gradient', true);
-      set(id, 'fill-extrusion-height', ['interpolate', ['linear'], ['zoom'], 15.3, 0, 16.2, ['coalesce', ['get', 'render_height'], 6]]);
-      set(id, 'fill-extrusion-base', ['interpolate', ['linear'], ['zoom'], 15.3, 0, 16.2, ['coalesce', ['get', 'render_min_height'], 0]]);
+      set(id, 'fill-extrusion-height', ['interpolate', ['linear'], ['zoom'], 14, 0, 16.2, ['max', 4, ['coalesce', ['get', 'render_height'], 6]]]);
+      set(id, 'fill-extrusion-base', ['interpolate', ['linear'], ['zoom'], 14, 0, 16.2, ['coalesce', ['get', 'render_min_height'], 0]]);
       continue;
     }
     if (l.type === 'line') {
@@ -188,7 +193,7 @@ export function applyPalette(map, P, opts = {}) {
   set('yolcu-hillshade', 'hillshade-highlight-color', P.highlight);
   set('yolcu-hillshade', 'hillshade-exaggeration', P.shadeK);
   // Işık: güneybatıdan, yüksek açıyla → binaların bir yüzü aydınlık, diğeri gölgeli
-  try { map.setLight({ anchor: 'map', color: '#ffffff', intensity: P.light, position: [1.15, 215, 30] }); } catch { }
+  try { map.setLight({ anchor: 'map', color: '#fff9ef', intensity: P.light, position: [1.15, 215, 40] }); } catch { }
   try {
     map.setSky({
       'sky-color': sat ? '#8DB7DE' : P.sky, 'horizon-color': P.horizon, 'fog-color': sat ? '#C9D6E2' : P.fog,
@@ -206,4 +211,26 @@ export function applyPalette(map, P, opts = {}) {
 export function firstLabelLayer(map) {
   const ids = map.getStyle().layers.map(l => l.id);
   return ['poi_r20', 'highway-name-path', 'label_other'].find(id => ids.includes(id));
+}
+
+// Flatten only the nearby navigation corridor, leaving the rest of the real city in 3D.
+export function setRouteBuildings(map,route,along=0,quality=0) {
+  const polygons=[];
+  if(route)for(let d=Math.max(0,along-100);d<Math.min(route.lengthM,along+850);d+=60){
+    const a=pointAt(route.coords,route.cum,d),b=pointAt(route.coords,route.cum,Math.min(route.lengthM,d+85));
+    const kx=111320*Math.cos(a.lat*Math.PI/180),ky=110540,dx=(b.lon-a.lon)*kx,dy=(b.lat-a.lat)*ky,n=Math.hypot(dx,dy)||1;
+    const ox=-dy/n*75/kx,oy=dx/n*75/ky;
+    const ring=[[a.lon+ox,a.lat+oy],[b.lon+ox,b.lat+oy],[b.lon-ox,b.lat-oy],[a.lon-ox,a.lat-oy],[a.lon+ox,a.lat+oy]];
+    polygons.push([ring]);
+  }
+  for(const layer of map.getStyle().layers){
+    if(layer.type==='fill-extrusion'){
+      const h=['max',4,['coalesce',['get','render_height'],6]];
+      const target=polygons.length?['case',['within',{type:'MultiPolygon',coordinates:polygons}],0,h]:h;
+      const value=quality>=2?0:['interpolate',['linear'],['zoom'],quality?15:14,0,16.2,target];
+      map.setPaintProperty(layer.id,'fill-extrusion-height',value);
+    }
+    if(layer.type==='symbol'&&layer['source-layer']==='place')map.setPaintProperty(layer.id,'text-opacity',route? .45 : 1);
+    if(layer.type==='symbol'&&layer['source-layer']==='transportation_name'&&/minor|path/.test(layer.id))map.setPaintProperty(layer.id,'text-opacity',quality? .6:1);
+  }
 }

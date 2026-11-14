@@ -1,0 +1,10 @@
+# Replace the hostname. Keep credentials in the service environment, outside this repository.
+yolcu.example.com {
+    basic_auth {
+        {$YOLCU_USER} {$YOLCU_PASSWORD_HASH}
+    }
+    reverse_proxy 127.0.0.1:4173 {
+        header_up Host {host}
+        header_up X-Yolcu-Gateway {$YOLCU_GATEWAY_TOKEN}
+    }
+}

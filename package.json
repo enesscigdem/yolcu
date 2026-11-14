@@ -1,0 +1,23 @@
+{
+  "name": "yolcu",
+  "version": "1.0.0",
+  "description": "Yolcu PWA",
+  "scripts": {
+    "start": "node server/dev.mjs",
+    "check": "node tools/check.mjs",
+    "test": "node --test tests/*.test.js",
+    "test:e2e": "playwright test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/enesscigdem/yolcu.git"
+  },
+  "type": "module",
+  "devDependencies": {
+    "@playwright/test": "^1.65.1"
+  },
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  }
+}

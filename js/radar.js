@@ -110,29 +110,3 @@ export function onRoute(cams, route) {
   }
   return out.sort((a, b) => a.along - b.along);
 }
-
-// Kısa uyarı sesi (ses kapalıyken de çalar)
-let ctx = null;
-export function unlockBeep() {
-  try {
-    if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
-    if (ctx.state !== 'running') ctx.resume();
-  } catch { }
-}
-export function beep(times = 2) {
-  try {
-    if (!ctx) unlockBeep();
-    const t0 = ctx.currentTime + 0.02;
-    for (let k = 0; k < times; k++) {
-      const o = ctx.createOscillator(), g = ctx.createGain();
-      o.type = 'sine';
-      o.frequency.setValueAtTime(1046, t0 + k * 0.22);
-      o.frequency.setValueAtTime(1318, t0 + k * 0.22 + 0.08);
-      g.gain.setValueAtTime(0, t0 + k * 0.22);
-      g.gain.linearRampToValueAtTime(0.35, t0 + k * 0.22 + 0.02);
-      g.gain.exponentialRampToValueAtTime(0.001, t0 + k * 0.22 + 0.18);
-      o.connect(g); g.connect(ctx.destination);
-      o.start(t0 + k * 0.22); o.stop(t0 + k * 0.22 + 0.2);
-    }
-  } catch { }
-}

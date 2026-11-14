@@ -1,0 +1,8 @@
+import fs from 'node:fs';import os from 'node:os';import {Navigator} from '../js/nav.js';import {Replanner} from '../js/replan.js';import {cumulative,pointAt,bearing} from '../js/geo.js';import * as api from '../js/api.js';import * as traffic from '../js/traffic.js';
+const key=JSON.parse(fs.readFileSync(os.homedir()+'/.config/yolcu/tomtom.json')).key;
+const route=JSON.parse(fs.readFileSync('tests/fixtures/izmir-routes.json'))[0];route.cum=cumulative(route.coords);
+const nav=new Navigator(route),a=pointAt(route.coords,route.cum,400),b=pointAt(route.coords,route.cum,405),t=Date.now();let last;
+for(let i=0;i<3;i++){last={lon:a.lon+(i?.0005:0),lat:a.lat+i*.00003,heading:bearing(a.lon,a.lat,b.lon,b.lat),speed:8,acc:5,t:t+i*1000};nav.update(last);}
+let committed;
+const start=performance.now();const replanner=new Replanner({getContext:()=>({from:last,to:{lon:route.coords.at(-1)[0],lat:route.coords.at(-1)[1]},confirmedAt:nav.confirmedAt,deviationMs:last.t-nav.offSince}),request:(c,signal)=>api.reroute(c.from,c.to,route,nav.along,{highways:true,hills:true,rough:true,tolls:false,maxExtraMinutes:5},[],(r,s)=>traffic.routeTraffic(key,r,s),signal),commit:r=>{committed={lengthM:Math.round(r.lengthM),seconds:r.trafficTime||r.time,live:!!r.trafficCheckedAt,hasManeuvers:r.maneuvers.length>0};return true;}});
+await replanner.run();const report={simulatedDetectionMs:last.t-nav.offSince,actualWallMs:performance.now()-start,metrics:replanner.metrics,committed};replanner.cancel();fs.writeFileSync('artifacts/live-reroute-results.json',JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));if(!committed)process.exitCode=1;

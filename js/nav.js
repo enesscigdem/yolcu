@@ -10,10 +10,14 @@ export class Navigator {
 
   setRoute(route) {
     this.r = route;
+    this.levels=[];for(const e of route.stats?.edges||[]){if(e.bridge==null&&e.tunnel==null)continue;for(let i=e.b;i<e.e;i++)this.levels[i]=e.bridge?'bridge':e.tunnel?'tunnel':'ground';}
     this.seg = 0;
     this.along = 0;
     this.off = 0;
-    this.lastReroute = Date.now();
+    this.heading = null;
+    this.lastFix = null; this.lastPosition = null;
+    this.lastReroute = 0;
+    this.offSince = null; this.confirmedAt = null;
     this.upIdx = -1;
     this.stage = {};
     this.started = false;
@@ -21,22 +25,24 @@ export class Navigator {
   }
 
   snap(p) {
-    const { coords, cum } = this.r;
-    let best = { d: Infinity, i: 0, t: 0 };
-    const from = Math.max(0, this.seg - 4);
-    const maxAlong = this.along + 1500;
-    for (let i = from; i < coords.length - 1; i++) {
-      if (cum[i] > maxAlong) break;
-      const r = projectOnSegment(p.lon, p.lat, coords[i], coords[i + 1]);
-      if (r.d < best.d) best = { ...r, i };
+    const {coords,cum}=this.r;
+    const dt=this.lastFix?Math.max(0,(p.t-this.lastFix.t)/1000):0;
+    const reach=this.started?Math.max(100,(p.speed||0)*Math.min(dt,30)*2+100):1500;
+    let best={d:Infinity,score:Infinity,i:0,t:0};const nearby=[];
+    const from=this.started?Math.max(0,this.seg-10):0;
+    for(let i=from;i<coords.length-1;i++){
+      if(cum[i]>this.along+reach)break;
+      const r=projectOnSegment(p.lon,p.lat,coords[i],coords[i+1]);
+      const heading=bearing(...coords[i],...coords[i+1]);
+      const delta=p.heading==null?0:Math.abs(((heading-p.heading+540)%360)-180);
+      const along=cum[i]+r.t*(cum[i+1]-cum[i]);
+      const travel=dist(this.lastFix?.lon??p.lon,this.lastFix?.lat??p.lat,p.lon,p.lat);
+      const jump=this.started?Math.max(0,Math.abs(along-this.along)-travel*2-35):0;
+      const score=r.d+(p.speed>2&&delta>70?40:0)+jump*.8;
+      if(r.d<8&&delta<35&&this.levels[i])nearby.push({level:this.levels[i],score});
+      if(score<best.score)best={...r,i,score};
     }
-    if (best.d > 120) {
-      // Kaybolduysak tüm rotada ara
-      for (let i = 0; i < coords.length - 1; i++) {
-        const r = projectOnSegment(p.lon, p.lat, coords[i], coords[i + 1]);
-        if (r.d < best.d) best = { ...r, i };
-      }
-    }
+    best.verticalAmbiguous=(!this.started||dt>6)&&nearby.some(a=>a.score<best.score+10&&nearby.some(b=>b.level!==a.level&&b.score<best.score+10));
     return best;
   }
 
@@ -61,16 +67,34 @@ export class Navigator {
     const { coords, cum, maneuvers: M } = this.r;
     const total = cum[cum.length - 1];
     const s = this.snap(p);
-    this.seg = s.i;
-    const along = cum[s.i] + s.t * (cum[s.i + 1] - cum[s.i]);
-    this.along = along;
+    const rawAlong = cum[s.i] + s.t * (cum[s.i + 1] - cum[s.i]);
+    const a = coords[s.i], b = coords[Math.min(s.i + 1, coords.length - 1)];
+    const routeBearing = bearing(a[0], a[1], b[0], b[1]);
+    const delta = p.heading == null ? 0 : Math.abs(((routeBearing - p.heading + 540) % 360) - 180);
+    const matched = !s.verticalAmbiguous && (p.acc || 100) <= 45 && s.d <= clamp((p.acc || 10) * .9, 7, 16) && (p.speed < 2 || delta < 65);
+    // A remote projection must never advance the route or trigger arrival.
+    const along = matched ? rawAlong : this.along;
+    if (matched) { this.seg = s.i; this.along = along; }
+    const moving = (p.speed || 0) > (this.r.mode === 'auto' ? 1.5 : .7);
+    const targetHeading = moving && p.heading != null ? p.heading : matched ? routeBearing : this.heading ?? 0;
+    if (this.heading == null || moving) this.heading = this.heading == null ? targetHeading : (this.heading + (((targetHeading - this.heading + 540) % 360) - 180) * .65 + 360) % 360;
+    let position = { lon: matched ? s.lon : p.lon, lat: matched ? s.lat : p.lat, heading: this.heading };
+    if(this.lastPosition && p.speed<.7 && dist(this.lastPosition.lon,this.lastPosition.lat,position.lon,position.lat)<Math.max(4,Math.min(10,p.acc*.8)))position={...this.lastPosition,heading:this.heading};
+    this.lastPosition=position;
 
     // Rotadan çıktı mı?
     const mode = this.r.mode || 'auto';
-    const tol = mode === 'auto' ? clamp((p.acc || 10) * 1.5, 40, 90) : clamp((p.acc || 10) * 1.3, 25, 60);
-    this.off = s.d > tol ? this.off + 1 : 0;
-    let reroute = false;
-    if (this.off >= 3 && Date.now() - this.lastReroute > 10000) { reroute = true; this.lastReroute = Date.now(); }
+    const tol = clamp((p.acc || 10)*1.6,12,45);
+    const distinct=!this.lastFix||p.t>this.lastFix.t;
+    const suspect=(p.acc||100)<=35 && (s.d>tol || (p.speed>2&&delta>=95));
+    if(distinct){
+      if(suspect){this.off++;if(this.offSince==null)this.offSince=p.t;}
+      else {this.off=0;this.offSince=null;this.confirmedAt=null;}
+    }
+    this.lastFix=p;
+    const confirmed=this.off>=2 && p.t-this.offSince>=650;
+    if(confirmed&&this.confirmedAt==null)this.confirmedAt=performance.now();
+    const reroute=confirmed;
 
     // Şu anki ve sıradaki manevra
     let k = 0;
@@ -94,7 +118,7 @@ export class Navigator {
     // Varış
     const dest = coords[coords.length - 1];
     const toDest = dist(p.lon, p.lat, dest[0], dest[1]);
-    if (!this.arrived && ((remM < 30 && s.d < 60) || toDest < 25)) this.arrived = true;
+    if (!this.arrived && (matched && remM < 30 && toDest < 40 && (p.acc || 10) < 40)) this.arrived = true;
 
     // Sesli uyarılar
     let say = null;
@@ -104,14 +128,14 @@ export class Navigator {
     else if (mode === 'bicycle') { farD = 300; nearD = 100; nowD = 25; }
     else { farD = v > 22 ? 1600 : v > 14 ? 800 : 450; nearD = v > 22 ? 600 : v > 14 ? 300 : 170; nowD = clamp(v * 3.5, 30, 90); }
 
-    if (!this.started) {
+    if (!this.started && matched) {
       this.started = true;
       const first = M[0];
       const st = first?.street ? `${first.street} üzerinden ilerleyin.` : 'Rota başladı.';
       say = st;
     }
 
-    if (up && !this.arrived && !reroute && this.off === 0) {
+    if (up && matched && !this.arrived && !reroute && this.off === 0) {
       if (this.upIdx !== j) {
         this.upIdx = j;
         this.stage = {};
@@ -136,17 +160,14 @@ export class Navigator {
       }
     }
 
-    // Kamera için rota yönü
-    const a = coords[s.i], b = coords[Math.min(s.i + 1, coords.length - 1)];
-    const routeBearing = bearing(a[0], a[1], b[0], b[1]);
-
     return {
+      position, matched, verticalAmbiguous:s.verticalAmbiguous,
       snapped: { lon: s.lon, lat: s.lat, d: s.d },
       along, k, up, upIdx: j, distToNext, then, gap,
       remS, remM, total,
-      street: this.streetAt(s.i, k),
-      limit: this.speedLimitAt(s.i),
-      offRoute: this.off >= 2,
+      street: matched ? this.streetAt(s.i, k) : '',
+      limit: matched ? this.speedLimitAt(s.i) : 0,
+      offRoute: confirmed, uncertain: !matched, confirmedAt: this.confirmedAt, deviationMs: confirmed ? p.t-this.offSince : 0,
       reroute, arrived: this.arrived, say, routeBearing
     };
   }
@@ -155,8 +176,9 @@ export class Navigator {
 // Sürüş simülatörü: rotayı gerçek hızlarla (veya hızlandırılmış) sürer
 export class Simulator {
   constructor(route, onPos, factor = 3) {
-    this.r = route; this.onPos = onPos; this.factor = factor; this.d = 0;
-    this.timer = setInterval(() => this.tick(), 500);
+    this.r = route;
+    this.levels=[];for(const e of route.stats?.edges||[]){if(e.bridge==null&&e.tunnel==null)continue;for(let i=e.b;i<e.e;i++)this.levels[i]=e.bridge?'bridge':e.tunnel?'tunnel':'ground';} this.onPos = onPos; this.factor = factor; this.d = 0;
+    this.resume();
   }
   speedAt(d) {
     const M = this.r.maneuvers;
@@ -179,5 +201,7 @@ export class Simulator {
       heading: bearing(a[0], a[1], b[0], b[1]), speed: v, acc: 5, alt: null, t: Date.now()
     });
   }
-  stop() { clearInterval(this.timer); }
+  pause(){clearInterval(this.timer);this.timer=null;}
+  resume(){if(this.timer==null)this.timer=setInterval(()=>this.tick(),500);}
+  stop(){this.pause();}
 }
