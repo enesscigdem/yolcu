@@ -50,6 +50,8 @@ const roadside=new Roadside({store,save,planner:api.planRoutes,canPark:()=>!S.si
    const el=document.createElement('button');el.type='button';el.className='rs-map-pin'+(i===selected?' selected':'');el.textContent=String(i+1);el.setAttribute('aria-label',o.place.name+' detayları');
    el.addEventListener('click',e=>{e.stopPropagation();roadside.detail(i);});
    roadsideMarkers.push(new maplibregl.Marker({element:el,anchor:'bottom'}).setLngLat([o.place.lon,o.place.lat]).addTo(S.map));
+   // Marker initialization supplies a generic English label; restore the place name.
+   el.setAttribute('aria-label',o.place.name+' detayları');
   });
  },
  onFocus:p=>{if(!p||!S.mapReady)return;if(S.nav)S.follow=false;S.map.easeTo({center:[p.lon,p.lat],zoom:16,padding:{top:S.nav?160:30,bottom:$('roadside').getBoundingClientRect().height+30,left:24,right:24},duration:500});},
