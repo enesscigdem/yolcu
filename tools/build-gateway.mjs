@@ -1,0 +1,5 @@
+import {execFileSync} from 'node:child_process';import {fileURLToPath} from 'node:url';import path from 'node:path';import fs from 'node:fs';import {createHash} from 'node:crypto';
+const root=fileURLToPath(new URL('../',import.meta.url)),out=path.join(root,'artifacts/recovery/worker-bundle');fs.mkdirSync(out,{recursive:true});
+execFileSync(process.execPath,[path.join(root,'node_modules/wrangler/bin/wrangler.js'),'deploy','--config',path.join(root,'server/gateway/wrangler.jsonc'),'--dry-run','--outdir',out],{cwd:root,stdio:'inherit'});
+const file=path.join(out,'worker.js'),data=fs.readFileSync(file);for(const name of ['TOMTOM_API_KEY','AI_API_KEY'])if(process.env[name]&&data.includes(Buffer.from(process.env[name])))throw Error('A provider credential was found in the bundle');
+fs.writeFileSync(path.join(out,'build-proof.json'),JSON.stringify({builtAt:new Date().toISOString(),entry:'worker.js',bytes:data.length,sha256:createHash('sha256').update(data).digest('hex'),providerCredentialsInBundle:false,publicDeployment:false},null,2)+'\n');

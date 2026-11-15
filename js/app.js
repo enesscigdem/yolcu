@@ -2,9 +2,10 @@ import {navigationTiming,routeSeconds,timingEvidence,hasFreshTraffic} from './ti
 import { store, save, addRecent, isSaved, toggleSaved, exportBackup, importBackup, packForLink, unpackFromLink, addTrip, toggleRouteSaved } from './store.js';
 import { remainingDwellSeconds } from './stops.js';
 import { Roadside } from './roadside.js';
+import {backendOrigin,backendConnected,backendHeaders,connectBackend,disconnectBackend,serviceFetch} from './backend.js';
 import { RELEASE, hasServerAPI, SERVER_UNAVAILABLE } from './assistant.js';
 import { routeCharacter } from './needs.js';
-import { FixStream } from './location.js';
+import { FixStream, GeolocationSession } from './location.js';
 import { Replanner } from './replan.js';
 import { Diagnostics, FollowCamera } from './diagnostics.js';
 import { createAudio, SOUND_MODES } from './audio.js';
@@ -19,7 +20,7 @@ import { dist, bearing, sliceAlong, pointAt, compass, fixTimestamp } from './geo
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const PREVIEW = ['localhost', '127.0.0.1'].includes(location.hostname) && new URLSearchParams(location.search).get('preview') === '1';
+const PREVIEW = new URLSearchParams(location.search).get('preview') === '1';
 const IZMIR = { lon: 27.142, lat: 38.423 };
 const EMPTY = { type: 'FeatureCollection', features: [] };
 const wide = () => window.innerWidth >= 700;
@@ -37,11 +38,12 @@ const S = {
   eta: {}, helloK: null, trip: null, prog: null, lastView: null
 };
 const fixes = new FixStream(), diagnostics = new Diagnostics(), camera = new FollowCamera();
+const positionSource=new GeolocationSession({geolocation:navigator.geolocation,onPosition:p=>{if(!S.sim){S.observedPosition=p;S.geoError=null;onPos(p);}},onError:e=>{if(!S.sim){S.geoError=e;if(S.nav)navHealth();else renderWherePill();}},onWatch:id=>S.geoWatch=id});
 const key = () => S.services?.traffic?'server':null;
-function tripContext(){const route=S.navRoute||S.routes[S.sel];if(!route||!S.pos||Date.now()-S.pos.t>5000)return null;return {route,along:S.nav?.along||0,from:{...S.pos},to:S.dest,prefs:{...store.prefs},avoids:[...structuredClone(store.avoids),...(S.tripAvoids||[])],stops:structuredClone(S.stops||route.stops||[]),traffic:trafficProvider(),manualOrder:!!S.stopOrderManual,activeDwellSeconds:remainingDwellSeconds([],S.activeDwell)};}
+function tripContext(){const route=S.navRoute||S.routes[S.sel];if(!route||!S.pos||(!S.sim&&Date.now()-S.pos.t>5000))return null;return {route,along:S.nav?.along||0,from:{...S.pos},to:S.dest,prefs:{...store.prefs},avoids:[...structuredClone(store.avoids),...(S.tripAvoids||[])],stops:structuredClone(S.stops||route.stops||[]),traffic:trafficProvider(),manualOrder:!!S.stopOrderManual,activeDwellSeconds:remainingDwellSeconds([],S.activeDwell)};}
 let roadsideMarkers=[];
-const roadside=new Roadside({store,save,planner:api.planRoutes,canPark:()=>!S.sim||PREVIEW,position:()=>PREVIEW&&S.pos?Promise.resolve({...S.pos,t:Date.now()}):freshPosition(),context:()=>S.nav?tripContext():null,hasTrip:()=>!!S.nav,getStops:()=>structuredClone(S.stops||[]),toast,
- findNearby:async(cat,point,signal)=>{if(key()){try{const found=await traffic.poiSearch(key(),cat,point,signal);if(found.length)return found;}catch(e){if(e.name==='AbortError')throw e;}}const list=await api.nearby({...cat,r:3500,fallback:cat.label},point,signal);return cat.brand?list.filter(p=>(p.name+' '+p.brand).toLocaleLowerCase('tr-TR').includes(cat.brand.toLocaleLowerCase('tr-TR'))):list;},
+const roadside=new Roadside({store,save,planner:api.planRoutes,canPark:()=>!S.sim||PREVIEW,position:()=>S.sim&&S.pos?Promise.resolve({...S.pos,t:Date.now(),source:'simulation'}):nearbyPosition(),context:()=>S.nav?tripContext():null,hasTrip:()=>!!S.nav,getStops:()=>structuredClone(S.stops||[]),toast,
+ findNearby:findNearbyPlaces,
  onResults:(options,selected)=>{
   roadsideMarkers.forEach(m=>m.remove());roadsideMarkers=[];
   if(!S.mapReady)return;
@@ -66,7 +68,7 @@ const roadside=new Roadside({store,save,planner:api.planRoutes,canPark:()=>!S.si
 });
 function applyStopChoice(choice){
  if(!S.nav){toast('Durak eklemek için sürüşü başlat');return;}if((choice.route.stops||[]).length>3){toast('En fazla üç durak ekleyebilirsin');return;}
- if(!S.pos||Date.now()-S.pos.t>5000){toast('Güncel konum bekleniyor');return;}
+ if(!S.pos||(!S.sim&&Date.now()-S.pos.t>5000)){toast('Güncel konum bekleniyor');return;}
  replanner.cancel();S.stops=choice.route.stops||choice.stops;S.stopOrderManual=true;
  if(dist(choice.from.lon,choice.from.lat,S.pos.lon,S.pos.lat)<45){if(!commitRoute(choice.route))replanner.run('add-stop',true);}else replanner.run('add-stop',true);
  saveActiveNav();toast('Ara durak eklendi');
@@ -180,10 +182,10 @@ async function keepAwake(on) {
 }
 document.addEventListener('visibilitychange',()=>{
   if(document.hidden){voice.stop();diagnostics.stop();S.sim?.pause();}
-  else if(S.nav){keepAwake(true);S.sim?.resume();diagnostics.start(adaptQuality);navHealth();if(!S.sim)freshPosition();}
+  else{if(!PREVIEW&&!S.sim){startGeo(true);positionSource.check();}if(S.nav){keepAwake(true);S.sim?.resume();diagnostics.start(adaptQuality);navHealth();}}
 });
 addEventListener('pagehide',()=>{voice.stop();diagnostics.stop();replanner.cancel();S.sim?.pause();stopGeo();if(S.nav&&!S.sim)saveActiveNav();});
-addEventListener('pageshow',()=>{if(!PREVIEW)startGeo();if(S.nav){S.sim?.resume();diagnostics.start(adaptQuality);navHealth();}});
+addEventListener('pageshow',()=>{if(!PREVIEW&&!S.sim)startGeo(true);if(S.nav){S.sim?.resume();diagnostics.start(adaptQuality);navHealth();}});
 addEventListener('online',()=>{if(S.nav&&S.lastState?.offRoute)replanner.run('online',true);});
 
 /* ================= Alt panel (sheet) ================= */
@@ -322,6 +324,7 @@ async function initMap() {
   catch { toast('Harita yüklenemedi. İnternet bağlantını kontrol et.', 5000); return; }
   const map = S.map = new maplibregl.Map({
     container: 'map', style, center: [IZMIR.lon, IZMIR.lat], zoom: 12, attributionControl: false,
+    transformRequest:url=>({url,headers:backendHeaders(url)}),
     maxPitch: 65, fadeDuration: 450, dragRotate: true, pitchWithRotate: true, antialias: true
   });
   map.on('load', () => {
@@ -524,7 +527,7 @@ async function loadIncidents(force = false) {
   const pad = [(bbox[2] - bbox[0]) * 0.3, (bbox[3] - bbox[1]) * 0.3];
   const big = [bbox[0] - pad[0], bbox[1] - pad[1], bbox[2] + pad[0], bbox[3] + pad[1]];
   try {
-    S.incidents = await traffic.incidents(key(), big);
+    const version=S.servicesVersion,list=await traffic.incidents(key(),big);if(version!==S.servicesVersion)return;S.incidents=list;
     S.incAt = { b: big, t: Date.now() };
     drawIncidents();
   } catch { }
@@ -625,6 +628,17 @@ function tileNearby(cat) {
   });
 }
 
+async function findNearbyPlaces(cat,point,signal){
+  const tileCat=api.CATEGORIES.find(c=>c.id===cat.id),tiles=tileCat?tileNearby(tileCat).map(p=>({...p,kind:cat.kind,src:'map'})).filter(p=>Number.isFinite(p.lon)&&Number.isFinite(p.lat)&&dist(point.lon,point.lat,p.lon,p.lat)<=3500):[];
+  const matches=p=>!cat.brand||(p.name+' '+(p.brand||'')).toLocaleLowerCase('tr-TR').includes(cat.brand.toLocaleLowerCase('tr-TR'));
+  const local=tiles.filter(matches).filter((p,i,a)=>a.findIndex(x=>dist(x.lon,x.lat,p.lon,p.lat)<25&&x.name===p.name)===i);
+  // Loaded vector POIs are real source data, and work without a paid backend.
+  if(!key()&&local.length)return local;
+  if(key())try{const found=await traffic.poiSearch(key(),cat,point,AbortSignal.any([signal||new AbortController().signal,AbortSignal.timeout(5000)]));if(found.length)return found;}catch(e){if(signal?.aborted)throw e;}
+  if(local.length)return local;
+  return api.nearby({...cat,r:3500,fallback:cat.label},point,signal);
+}
+
 /* ---------- Akıllı karşılama ve favori süreleri ---------- */
 // Sabah işe, akşam eve; evdeysen işe, işteysen eve. Süre trafikli (TomTom) ya da tahmini.
 function helloTarget() {
@@ -696,11 +710,11 @@ function setPuckNav(on) {
 function onPos(input,replay=false) {
   const began=performance.now();
   const p=fixes.accept(input,replay?fixTimestamp(input.t):Date.now());
-  if(!p){if(S.nav)navHealth();return;}
+  if(!p){if(S.nav)navHealth();else if(Number.isFinite(input.lat)&&Number.isFinite(input.lon)&&Math.abs(input.lat)<=90&&Math.abs(input.lon)<=180&&input.acc>60&&input.acc<=1500&&fixTimestamp(input.t)<=Date.now()+1500&&Date.now()-fixTimestamp(input.t)<5000){S.approximatePosition={...input};updatePuck({...input,speed:0,heading:null});S.puck?.getElement().classList.add('approximate');if(S.firstFix&&S.mapReady){S.firstFix=false;introFly(input);}renderWherePill();}return;}
   p._received=began;
   if (!Number.isFinite(p.lon) || !Number.isFinite(p.lat) || (S.pos && p.t < S.pos.t)) return;
   const first = !S.pos;
-  S.pos = p;
+  S.pos = p;S.approximatePosition=null;S.puck?.getElement().classList.remove('approximate');
   if (!S.sim) S.realPos = p;
   updatePuck(p);
   if (first) { updateLocateBtn(); loadRadars(p); updateWeather(p); }
@@ -714,20 +728,8 @@ function onPos(input,replay=false) {
   }
 }
 
-function stopGeo(){if(S.geoWatch!=null){navigator.geolocation?.clearWatch(S.geoWatch);S.geoWatch=null;}}
-function startGeo() {
-  if(S.geoWatch!=null)return;
-  if (!('geolocation' in navigator)) { toast('Bu cihazda konum desteği yok'); return; }
-  S.geoWatch = navigator.geolocation.watchPosition(
-    g => {
-      if (S.sim) return;
-      const c = g.coords;
-      onPos({ lat: c.latitude, lon: c.longitude, acc: c.accuracy, speed: c.speed, heading: c.heading, alt: c.altitude, t: g.timestamp || Date.now() });
-    },
-    err => { if (err.code === 1) toast('Konum izni verilmedi. Ayarlar › Gizlilik › Konum Servisleri’nden izin ver.', 6000); },
-    { enableHighAccuracy: true, maximumAge: 1000, timeout: 30000 }
-  );
-}
+function stopGeo(){positionSource.stop();}
+function startGeo(restart=false){if(!PREVIEW&&!S.sim)positionSource.start(restart);}
 
 function waitPos(ms = 8000) {
   if (S.pos) return Promise.resolve(S.pos);
@@ -738,15 +740,15 @@ function waitPos(ms = 8000) {
 }
 
 async function freshPosition() {
-  if (S.pos && Date.now() - S.pos.t < 1500 && S.pos.acc <= 50) return S.pos;
-  if (!navigator.geolocation) return null;
-  try {
-    const g = await new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, maximumAge: 0, timeout: 8000 }));
-    const c = g.coords;
-    const p = { lat: c.latitude, lon: c.longitude, acc: c.accuracy, heading: c.heading, speed: c.speed, alt: c.altitude, t: g.timestamp || Date.now() };
-    onPos(p);
-  } catch { }
-  return S.pos && Date.now() - S.pos.t < 10000 && S.pos.acc <= 80 ? S.pos : null;
+  if(S.sim)return S.pos;
+  if(S.pos&&Date.now()-S.pos.t<1500&&S.pos.acc<=50)return S.pos;
+  await positionSource.refresh();
+  return S.pos&&Date.now()-S.pos.t<5000&&S.pos.acc<=50?S.pos:null;
+}
+async function nearbyPosition(){
+  const usable=()=>{if(S.pos&&Date.now()-S.pos.t<5000)return {...S.pos,approximate:S.pos.acc>50};const p=positionSource.position;return p&&Number.isFinite(p.lat)&&Number.isFinite(p.lon)&&Math.abs(p.lat)<=90&&Math.abs(p.lon)<=180&&p.acc>60&&p.acc<=1500&&p.t<=Date.now()+1500&&Date.now()-p.t<5000?{...p,approximate:true}:null;};
+  const current=usable();if(current)return current;
+  await positionSource.refresh();return usable();
 }
 
 function updateWhere(p) {
@@ -763,6 +765,9 @@ function updateWhere(p) {
 
 function renderWherePill() {
   const r = S.where;
+  if(!S.nav&&S.geoError&&(S.geoError.code===1||!fixes.last||Date.now()-fixes.last.t>5000)){$('where-pill').hidden=false;$('where-road').textContent=S.geoError.code===1?'Konum izni kapalı · yeniden dene':'Konum alınamadı · yeniden dene';$('weather').textContent='';$('where-pill').dataset.act='retryLocation';return;}
+  if(!S.nav&&S.approximatePosition){$('where-pill').hidden=false;$('where-road').textContent=`Yaklaşık konum · ±${Math.round(S.approximatePosition.acc)} m`;$('weather').textContent='';$('where-pill').dataset.act='retryLocation';return;}
+  $('where-pill').dataset.act='openWhere';
   $('where-pill').hidden = !r || !!S.nav;
   if (!r) return;
   $('where-road').textContent = r.hood || r.road || r.district || 'Buradasın';
@@ -1202,10 +1207,10 @@ async function planRoutes() {
   S.routes = []; S.routeErr = null; S.sel = 0;
   render();
   setRoutesData([]); setJams([]); clearChips();
+  try {
   const from = PREVIEW ? (S.pos||await waitPos()) : await freshPosition();
   if (ac.signal.aborted) return;
-  if (!from) { S.routeErr = 'Konumun alınamadı. Konum iznini kontrol et.'; render(); return; }
-  try {
+  if (!from) { S.routeErr = S.geoError?.message||(positionSource.position?.acc>50?`Konum doğruluğu ±${Math.round(positionSource.position.acc)} m. Sürüş için daha doğru ölçüm bekleniyor.`:'Güncel konum alınamadı. Konum servisini ve iznini kontrol edip tekrar dene.'); render(); return; }
     const tf = trafficProvider();
     const routes = await api.planRoutes(from, S.dest, store.prefs, [...store.avoids,...(S.resumeAvoids||[])], ac.signal, S.travel, tf, S.preferredTrip?.coords,S.resumeStops||[]);
     S.resumeStops=null;
@@ -1262,6 +1267,7 @@ async function startNav(i, simulate = false) {
     }
   }
   S.starting = false;
+  S.simulatedResume=simulate?structuredClone(store.activeNav):null;
   addRecent(S.dest);
   if (!simulate) { store.activeNav = { dest: S.dest, t: Date.now() }; save(); }
   S.navRoute = route;
@@ -1300,15 +1306,14 @@ async function startNav(i, simulate = false) {
   keepAwake(true);
   if (key() && route.mode === 'auto') {
     refreshNavIncidents();
-    S.timers.push(setInterval(refreshNavIncidents, 120000));
-    S.timers.push(setInterval(refreshNavTraffic, 300000));
   }
+  if(route.mode==='auto'){S.timers.push(setInterval(refreshNavIncidents,120000));S.timers.push(setInterval(refreshNavTraffic,300000));}
   $('nav-status').hidden = true;
   diagnostics.start(adaptQuality);
   S.timers.push(setInterval(navHealth,1000));
   if (simulate) {
-    fixes.reset();
-    S.sim = new Simulator(route, p => { onPos(p); }, 3);
+    stopGeo();fixes.reset();
+    S.sim = new Simulator(route, p => { onPos(p); }, 3);S.sim.tick();
     showSimStatus();
   } else {
     $('sim-badge').hidden = true;
@@ -1318,11 +1323,11 @@ async function startNav(i, simulate = false) {
 
 async function refreshNavIncidents() {
   if (!S.nav || !key()) return;
-  const r = S.navRoute;
+  const r = S.navRoute,version=S.servicesVersion;
   const rem = sliceAlong(r.coords, r.cum, S.nav.along, Math.min(r.lengthM, S.nav.along + 60000));
   try {
     const list = await traffic.incidents(key(), traffic.bboxOf(rem, 0.004));
-    if (!S.nav || S.navRoute !== r) return;
+    if (!S.nav || S.navRoute !== r || version!==S.servicesVersion) return;
     S.navInc = traffic.onRoute(list.filter(i => i.cat !== 6 || i.delay >= 60), S.navRoute);
     drawIncidents();
   } catch { }
@@ -1330,12 +1335,12 @@ async function refreshNavIncidents() {
 
 async function refreshNavTraffic() {
   if (!S.nav || !key()) return;
-  const r = S.navRoute;
+  const r = S.navRoute,version=S.servicesVersion;
   try {
     if (!S.lastRemS) return;
     const rem = { coords: sliceAlong(r.coords, r.cum, S.nav.along, r.lengthM), time: S.lastRemS };
     const t = await traffic.routeTraffic(key(), rem);
-    if (S.nav && S.navRoute === r) { S.remainingTraffic={baseSeconds:rem.time,seconds:t.trafficTime,at:t.trafficCheckedAt};setJams(t.jams); }
+    if (S.nav && S.navRoute === r && version===S.servicesVersion) { S.remainingTraffic={baseSeconds:rem.time,seconds:t.trafficTime,at:t.trafficCheckedAt};setJams(t.jams); }
   } catch { }
 }
 
@@ -1343,7 +1348,7 @@ async function refreshNavTraffic() {
 function showSimStatus() {
   const b = $('sim-badge');
   b.hidden = false;
-  b.textContent = `Önizleme · ${S.sim.factor}×`;
+  b.textContent = S.sim.timer===null?'Önizleme · duraklatıldı':`Önizleme · ${S.sim.factor}×`;
 }
 
 function navPadding() {
@@ -1515,14 +1520,22 @@ function trafficProvider(){
 }
 function saveActiveNav(){if(!S.nav||S.sim)return;store.activeNav={dest:S.dest,stops:S.stops||[],walkGoal:S.walkGoal||null,activeDwell:S.activeDwell||null,tripAvoids:S.tripAvoids||[],t:Date.now()};save();}
 function renderUncertain(st){
-  S.bannerFor=null;$('nav-icon').innerHTML=I.locLine;$('nav-dist').textContent=st.offRoute?'Rota dışında':'Konum doğrulanıyor';$('nav-action').textContent=st.offRoute?'Yeni güzergâh aranıyor':'GPS ölçümü bekleniyor';$('nav-road').textContent='';$('nav-then').hidden=true;setArrowData([]);S.arrowFor=-1;
+  S.bannerFor=null;$('nav-icon').innerHTML=I.locLine;
+  const raw=S.observedPosition,low=!S.sim&&raw?.acc>45&&raw.t<=Date.now()+1500&&Date.now()-raw.t<5000,stale=!S.sim&&(!fixes.last||Date.now()-fixes.last.t>5000),error=!S.sim&&S.geoError&&(S.geoError.code===1||stale)?S.geoError:null;
+  $('nav-dist').textContent=error?.code===1?'Konum izni kapalı':low?'Konum doğruluğu düşük':stale?'Konum sinyali bekleniyor':st.offRoute?'Rota dışında':st.verticalAmbiguous?'Yol seviyesi doğrulanıyor':(S.pos?.acc||0)>45?'Konum doğruluğu düşük':'Yol eşleşmesi bekleniyor';
+  $('nav-action').textContent=error?error.message:low?`Konum alındı · ±${Math.round(raw.acc)} m`:stale?'Yeni GPS ölçümü bekleniyor':st.offRoute?'Yeni güzergâh aranıyor':(S.pos?.acc||0)>45?`Konum alındı · ±${Math.round(S.pos.acc)} m`:'Konum alındı · yön ve yol doğrulanıyor';
+  $('nav-road').textContent='';$('nav-then').hidden=true;setArrowData([]);S.arrowFor=-1;
 }
+
 function adaptQuality(level){if(S.mapReady){setRouteBuildings(S.map,S.navRoute,S.nav?.along||0,level);if(S.nav&&S.map.getLayer('yolcu-hillshade'))S.map.setLayoutProperty('yolcu-hillshade','visibility','none');}}
 function navHealth(){
   if(!S.nav)return;
-  const quality=fixes.status(),reason=!navigator.onLine?'İnternet bağlantısı bekleniyor':quality||(S.rerouting?'Rota yenileniyor':S.replanMessage||'');
-  const el=$('nav-status');el.hidden=!reason;el.textContent=reason;el.className='nav-status';
+  const raw=S.observedPosition,accuracyIssue=raw?.acc>45&&raw.t<=Date.now()+1500&&Date.now()-raw.t<5000?`Konum doğruluğu düşük · ±${Math.round(raw.acc)} m`:'';
+  const geoIssue=S.geoError&&(S.geoError.code===1||!fixes.last||Date.now()-fixes.last.t>5000)?S.geoError.message:'';
+  const quality=S.sim?'':geoIssue||accuracyIssue||fixes.status(),reason=!navigator.onLine?'İnternet bağlantısı bekleniyor':quality||(S.rerouting?'Rota yenileniyor':S.replanMessage||'');
+  const el=$('nav-status');const notice=S.sim?.timer===null?'Önizleme duraklatıldı':reason;el.hidden=!notice;el.textContent=notice;el.className='nav-status';
   if(quality){$('nav-timing').textContent='Konum bekleniyor · son tahmin';$('speed-val').textContent='—';if(S.lastState)renderUncertain({...S.lastState,offRoute:false});}
+  if(S.sim)showSimStatus();
   if(S.diagnostics){const data=diagnostics.snapshot();if(S.timing)data.timing={...S.timing.evidence,remainingBaseSeconds:S.timing.baseSeconds,remainingDriveSeconds:S.timing.driveSeconds,dwellSeconds:S.timing.dwellSeconds,totalSeconds:S.timing.totalSeconds,live:S.timing.live};data.fixAgeMs=S.pos?Math.max(0,Date.now()-S.pos.t):null;data.deviationMs=S.lastState?.deviationMs;data.replans=replanner.metrics.slice(-3);data.inFlight=!!replanner.controller;data.gpsWatches=S.geoWatch==null?0:1;data.navTimers=S.timers.length;$('diagnostics-data').textContent=JSON.stringify(data,null,2);}
 }
 function commitRoute(r){
@@ -1614,7 +1627,8 @@ function endNav() {
   setPuckNav(false);
   keepAwake(false);
   voice.stop();
-  store.activeNav = null; save();
+  store.activeNav = simulated?S.simulatedResume||null:null;S.simulatedResume=null;save();
+  if(!PREVIEW)startGeo(true);
   S.map?.getSource('yolcu-traveled')?.setData(EMPTY);
   setRoutesData([]); setArrowData([]); setJams([]); setDest(null);
   applyTheme();
@@ -1679,7 +1693,7 @@ const SETTINGS_SECTIONS={
  sound:{title:'Ses ve radar',icon:'speaker',groups:['Ses','Radar','Elle işaretlenmiş radarlar'],sub:'Sessizlik, yönlendirme ve uyarılar'},
  routing:{title:'Rota tercihleri',icon:'road',groups:['Rota tercihleri'],sub:'Ana yollar, eğim, yüzey ve ücretler'},
  journey:{title:'Yerlerim ve yolculuk',icon:'star',groups:['Ev ve iş','Yol üstü & kişisel yardım','Benim yerlerim','Kaçındığın yollar'],sub:'Ev, iş, duraklar ve hatırlatmalar'},
- connections:{title:'Trafik bağlantısı',icon:'route',groups:['Trafik ve işletmeler'],sub:'Sunucuda tutulan servis bağlantısı'},
+ connections:{title:'Trafik ve sunucu bağlantısı',icon:'route',groups:['Trafik ve işletmeler'],sub:'Sunucuda tutulan servis bağlantısı'},
  privacy:{title:'Verilerim ve uygulama',icon:'download',groups:['Yedek','Hakkında'],sub:'Yedekleme, kaynaklar ve sürüm'}
 };
 function arrangeSettings(){
@@ -1693,6 +1707,15 @@ function arrangeSettings(){
  if(theme)$('quick-theme').append(...theme.nodes);
 }
 
+function backendConnectionForm(){return `<form class="backend-connection" onsubmit="return false"><label>Sunucu adresi<input id="backend-origin" type="url" inputmode="url" autocomplete="url" placeholder="https://yolcu-gateway.hesabin.workers.dev" value="${esc(S.backendDraftOrigin??backendOrigin())}"></label><label>Bağlantı parolası<input id="backend-password" type="password" autocomplete="current-password" placeholder="Sunucunun uygulama parolası"></label><p>Bu parola API anahtarı değildir. TomTom ve AI anahtarları yalnız sunucuda kalır.</p><button type="button" class="btn primary" data-act="connectBackend" ${S.backendConnecting?'disabled':''}>${S.backendConnecting?'Bağlanıyor…':'Sunucuya bağlan'}</button>${backendOrigin()?'<button type="button" class="btn secondary" data-act="disconnectBackend">Bu cihazın bağlantısını kaldır</button>':''}<p role="status">${esc(S.backendMessage||(backendOrigin()?(backendConnected()?'Uygulama oturumu açık. Servis erişimini ayrıca doğrula.':'Bağlantı oturumu bekleniyor.'):'Uzak sunucu bağlanmadı. Temel navigasyon ve gerçek OSM işletme araması kullanılabilir.'))}</p></form>`;}
+async function refreshServices(){
+ const version=S.servicesVersion=(S.servicesVersion||0)+1;
+ try{if(!hasServerAPI())throw new Error('Sunucu bağlantısı yok');const r=await serviceFetch('/api/services');if(!r.ok||!r.headers.get('content-type')?.includes('application/json'))throw new Error('Sunucu bağlantısı doğrulanamadı');const value=await r.json();if(version!==S.servicesVersion)return;S.services=value;}
+ catch{if(version!==S.servicesVersion)return;S.services={traffic:false,ai:false};}
+ if(S.mapReady){setFlow();loadIncidents(true);}if(S.view==='home'&&!S.nav)render();if(S.nav&&key()){refreshNavTraffic();refreshNavIncidents();}
+}
+addEventListener('yolcu-backend-session',()=>{S.modelsController?.abort();S.modelsVersion=(S.modelsVersion||0)+1;S.aiCatalog=null;S.modelsLoading=false;S.modelSaving=false;S.modelError=backendOrigin()&&!backendConnected()?'Bağlantı oturumu kapandı. Sunucuya yeniden bağlan.':null;S.services={traffic:false,ai:false};S.remainingTraffic=null;S.incidents=[];S.navInc=[];S.incAt=null;for(const r of new Set([...S.routes,S.navRoute].filter(Boolean)))r.trafficCheckedAt=0;if(S.mapReady){setJams([]);drawIncidents();}roadside.assistant.cancel();roadside.assistant.cache.clear();if(S.settingsSection==='models')renderModels();refreshServices();});
+
 function modelRows(data,query=''){
  const list=(data?.models||[]).filter(m=>(m.id+' '+m.label).toLocaleLowerCase('tr-TR').includes(query.toLocaleLowerCase('tr-TR'))).sort((a,b)=>Number(b.id===data.model)-Number(a.id===data.model));
  return list.map(m=>`<button class="model-option" role="radio" aria-checked="${m.id===data.model}" data-act="chooseModel" data-model="${esc(m.id)}" ${data.modelLocked||S.modelSaving?'disabled':''}><span class="model-mark">${m.id===data.model?I.check:''}</span><span><b>${esc(m.label||m.id)}</b>${m.label&&m.label!==m.id?`<small>${esc(m.id)}</small>`:''}</span>${m.id===data.model?'<em>Seçili</em>':''}</button>`).join('')||'<p class="model-empty">Bu aramaya uyan model yok.</p>';
@@ -1701,15 +1724,15 @@ function renderModels(){
  if(S.settingsSection!=='models')return;
  $('settings').querySelector('.page-head h1').textContent='Yolculuk asistanı';$('settings').querySelector('[data-act=closeSettings]').textContent='Geri';
  const data=S.aiCatalog,locked=data?.modelLocked;
- $('settings-body').innerHTML=`<div class="settings-intro"><span class="assistant-emblem">${I.star}</span><p class="eyebrow">YapayZekaLab</p><h2>İsteğini anlasın.<br>Kararı sen ver.</h2><p>Yalnız yazdığın istek çözümlenir. Konum akışın paylaşılmaz; model kullanılamasa da yol tarifi ve ihtiyaç araması devam eder.</p></div><div class="model-status" role="status">${S.modelsLoading?'Hesabındaki modeller yükleniyor…':S.modelError?esc(S.modelError):data?.models?.length?`${data.models.length} kullanılabilir model${locked?' · sunucudan yönetiliyor':''}`:data?.models?'Bu hesapta model listelenmiyor.':'Henüz model listesi alınmadı.'}</div>${locked?'<p class="model-notice">Model sunucu ayarıyla sabitlenmiş. Uygulamadan değiştirmek için sunucu yöneticisinin AI_MODEL sabitlemesini kaldırması gerekiyor.</p>':''}${data?.models?.length?`<label class="model-search">${I.search}<input id="model-query" type="search" placeholder="Modellerde ara" aria-label="Modellerde ara"></label><div id="model-options" class="model-options" role="radiogroup" aria-label="Hesabındaki modeller">${modelRows(data)}</div>`:''}<button class="btn secondary" data-act="refreshModels" ${S.modelsLoading||!hasServerAPI()?'disabled':''}>${I.refresh||I.route} Listeyi yenile</button><details class="model-details"><summary>Bağlantı ve gizlilik</summary><p>Anahtar bu uygulamaya veya yedeğine konmaz; sunucuda tutulur. GitHub Pages üzerinde sunucu özellikleri ayrıca yayımlanmış bir backend gerektirir.</p></details>`;
+ $('settings-body').innerHTML=`<div class="settings-intro"><span class="assistant-emblem">${I.star}</span><p class="eyebrow">YapayZekaLab</p><h2>İsteğini anlasın.<br>Kararı sen ver.</h2><p>Yalnız yazdığın istek çözümlenir. Konum akışın paylaşılmaz; model kullanılamasa da yol tarifi ve ihtiyaç araması devam eder.</p></div><div class="model-status" role="status">${S.modelsLoading?'Hesabındaki modeller yükleniyor…':S.modelError?esc(S.modelError):data?.models?.length?`${data.models.length} kullanılabilir model${locked?' · sunucudan yönetiliyor':''}`:data?.models?'Bu hesapta model listelenmiyor.':'Henüz model listesi alınmadı.'}</div>${locked?'<p class="model-notice">Model sunucu ayarıyla sabitlenmiş. Uygulamadan değiştirmek için sunucu yöneticisinin AI_MODEL sabitlemesini kaldırması gerekiyor.</p>':''}${data?.models?.length?`<label class="model-search">${I.search}<input id="model-query" type="search" placeholder="Modellerde ara" aria-label="Modellerde ara"></label><div id="model-options" class="model-options" role="radiogroup" aria-label="Hesabındaki modeller">${modelRows(data)}</div>`:''}<button class="btn secondary" data-act="refreshModels" ${S.modelsLoading||!hasServerAPI()?'disabled':''}>${I.refresh||I.route} Listeyi yenile</button>${!hasServerAPI()||S.modelError?'<button class="btn secondary" data-act="openConnectionSettings">Sunucu bağlantısını ayarla</button>':''}<details class="model-details"><summary>Bağlantı ve gizlilik</summary><p>Anahtar bu uygulamaya veya yedeğine konmaz; sunucuda tutulur. GitHub Pages üzerinde sunucu özellikleri ayrıca yayımlanmış bir backend gerektirir.</p></details>`;
  $('model-query')?.addEventListener('input',e=>{$('model-options').innerHTML=modelRows(S.aiCatalog,e.target.value);});
  $('settings-body').scrollTop=0;
 }
 async function loadModels(){
  S.modelsController?.abort();const ac=S.modelsController=new AbortController();const version=S.modelsVersion=(S.modelsVersion||0)+1;S.modelError=null;S.modelsLoading=true;
- if(!hasServerAPI()){S.modelsLoading=false;S.modelError='Bu statik yayında model sunucusu bağlı değil. Normal arama ve yol tarifi kullanılabilir.';renderModels();return;}
+ if(!hasServerAPI()){S.modelsLoading=false;S.modelError='Bu statik yayında model sunucusu bağlı değil. Ayarlardan sunucu bağlantısını kur. Normal arama ve yol tarifi kullanılabilir.';renderModels();return;}
  renderModels();
- try{const r=await fetch('/api/ai/models',{signal:AbortSignal.any([ac.signal,AbortSignal.timeout(15000)])});if(!r.headers.get('content-type')?.includes('application/json'))throw new Error('Bu yayında model sunucusu bağlı değil. Normal arama ve yol tarifi kullanılabilir.');const data=await r.json();if(!r.ok)throw new Error(data.error||'Model listesi alınamadı');if(version!==S.modelsVersion)return;S.aiCatalog=data;}
+ try{const r=await serviceFetch('/api/ai/models',{signal:AbortSignal.any([ac.signal,AbortSignal.timeout(15000)])});if(!r.headers.get('content-type')?.includes('application/json'))throw new Error('Bu yayında model sunucusu bağlı değil. Normal arama ve yol tarifi kullanılabilir.');const data=await r.json();if(!r.ok)throw new Error(data.error||'Model listesi alınamadı');if(version!==S.modelsVersion)return;S.aiCatalog=data;}
  catch(e){if(version!==S.modelsVersion)return;S.aiCatalog=null;S.modelError=e.name==='TimeoutError'?'Bağlantı zaman aşımına uğradı. Yeniden deneyebilirsin.':e.message;}
  finally{if(version===S.modelsVersion){S.modelsLoading=false;renderModels();}}
 }
@@ -1739,7 +1762,7 @@ function renderSettings() {
     <p class="group-foot">Sessiz modda ses sistemi başlatılmaz. Sesli modlarda kısa anonslar diğer seslerle karışacak şekilde istenir; son davranış iOS ve Bluetooth aygıtına bağlıdır.</p>
     <div class="group-title">Radar</div><div class="list plain"><label class="row"><span class="row-main"><span class="row-title">Haritada radar uyarıları</span><span class="row-sub">${S.official.length} EDS · ${S.cams.length} çevredeki radar</span></span><input type="checkbox" class="switch" data-pref="radar" ${P.radar ? 'checked' : ''}></label></div>${oldRadars}
 
-    <div class="group-title">Trafik ve işletmeler</div><div class="list plain"><div class="row">${placeIcon('road')}<span class="row-main"><span class="row-title">Güvenli sunucu bağlantısı</span><span class="row-sub wrap">${key()?'Sunucuda yapılandırıldı · servis erişimi istekte doğrulanır':'Temel harita ve rota kullanılabilir. Canlı trafik için sunucu bağlantısı gerekiyor.'}</span></span></div><button class="row" data-act="testTraffic" ${key()?'':'disabled'}>Bağlantıyı doğrula</button></div><p id="traffic-connection-result" class="group-foot" role="status">${esc(S.trafficTest||'')}</p>
+    <div class="group-title">Trafik ve işletmeler</div>${backendConnectionForm()}<div class="list plain"><div class="row">${placeIcon('road')}<span class="row-main"><span class="row-title">Güvenli sunucu bağlantısı</span><span class="row-sub wrap">${key()?'Sunucuda yapılandırıldı · servis erişimi istekte doğrulanır':'Temel harita ve rota kullanılabilir. Canlı trafik için sunucu bağlantısı gerekiyor.'}</span></span></div><button class="row" data-act="testTraffic" ${key()?'':'disabled'}>Bağlantıyı doğrula</button></div><p id="traffic-connection-result" class="group-foot" role="status">${esc(S.trafficTest||'')}</p>
 
     <div class="group-title">Uygulama simgesi</div>
     <div class="icon-grid">${icons}</div>
@@ -1810,8 +1833,11 @@ const ACT = {
   navTilt:()=>{setTilt(!store.prefs.tilt);camera.reset();closeNavMenu();if(S.pos)navTick(S.pos);},
   openModels:()=>{S.settingsSection='models';renderSettings();loadModels();},
   refreshModels:()=>loadModels(),
+  openConnectionSettings:()=>{S.settingsSection='connections';renderSettings();},
+  connectBackend:async el=>{if(S.backendConnecting)return;S.backendConnecting=true;el.disabled=true;S.backendMessage='Sunucu ve oturum doğrulanıyor…';const origin=$('backend-origin')?.value||'',password=$('backend-password')?.value||'';S.backendDraftOrigin=origin;try{await connectBackend(origin,password);await refreshServices();S.backendMessage='Sunucuya bağlandı. Trafik kontrolü ve model listesi gerçek servis isteğiyle doğrulanır.';}catch(e){S.backendMessage=e.name==='TimeoutError'?'Sunucu yanıt vermedi. Adresi ve dağıtım durumunu kontrol et.':e.message;}finally{S.backendConnecting=false;if(S.settingsSection==='connections')renderSettings();}},
+  disconnectBackend:()=>{S.backendDraftOrigin='';disconnectBackend();S.services={traffic:false,ai:false};S.backendMessage='Bu cihazın sunucu bağlantısı kaldırıldı.';setFlow();renderSettings();},
   testTraffic:async el=>{el.disabled=true;const status=$('traffic-connection-result');if(status)status.textContent='Bağlantı doğrulanıyor…';try{await traffic.testKey('server');S.trafficTest='Doğrulandı · arama sağlayıcısı sunucudan yanıt verdi';}catch(e){S.trafficTest=e.message||'Bağlantı doğrulanamadı';}finally{el.disabled=false;if($('traffic-connection-result'))$('traffic-connection-result').textContent=S.trafficTest;}},
-  chooseModel:async el=>{if(S.modelSaving)return;S.modelSaving=true;S.modelError=null;el.disabled=true;try{const r=await fetch('/api/ai/model',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:el.dataset.model}),signal:AbortSignal.timeout(15000)});const data=await r.json();if(!r.ok)throw new Error(data.error||'Model seçilemedi');S.aiCatalog={...S.aiCatalog,model:data.model};roadside.assistant.cancel();roadside.assistant.cache.clear();toast('Model seçildi');}catch(e){S.modelError=e.name==='TimeoutError'?'Model seçimi zaman aşımına uğradı':e.message;toast(S.modelError);}finally{S.modelSaving=false;if(S.settingsSection==='models')renderModels();}},
+  chooseModel:async el=>{if(S.modelSaving)return;const version=S.modelsVersion;S.modelSaving=true;S.modelError=null;el.disabled=true;try{const r=await serviceFetch('/api/ai/model',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:el.dataset.model}),signal:AbortSignal.timeout(15000)});const data=await r.json();if(version!==S.modelsVersion)return;if(!r.ok)throw new Error(data.error||'Model seçilemedi');S.aiCatalog={...S.aiCatalog,model:data.model};roadside.assistant.cancel();roadside.assistant.cache.clear();toast('Model seçildi');}catch(e){if(version!==S.modelsVersion)return;S.modelError=e.name==='TimeoutError'?'Model seçimi zaman aşımına uğradı':e.message;toast(S.modelError);}finally{if(version===S.modelsVersion){S.modelSaving=false;if(S.settingsSection==='models')renderModels();}}},
   openSettingsSection:el=>{S.settingsSection=el.dataset.section;renderSettings();$('settings-body').scrollTop=0;},
   routePrefs:()=>{S.settingsSection='routing';ACT.openSettings();},
   avoidList: () => { S.settingsSection='journey';ACT.openSettings(); requestAnimationFrame(() => $('avoided-roads')?.scrollIntoView({ block: 'start' })); },
@@ -1929,7 +1955,7 @@ const ACT = {
     text = text.charAt(0).toLocaleUpperCase('tr') + text.slice(1);
     try { if (navigator.share) await navigator.share({ text }); else { await navigator.clipboard.writeText(text); toast('Kopyalandı'); } } catch { }
   },
-  recenter: () => { S.overview=false;setPuckNav(true);camera.reset(); S.follow = true; $('nav-recenter').hidden = true; if (S.pos) navTick(S.pos); },
+  recenter: () => { if(!S.sim&&(S.geoError||!S.pos||Date.now()-S.pos.t>5000)){ACT.retryLocation();return;}S.overview=false;setPuckNav(true);camera.reset(); S.follow = true; $('nav-recenter').hidden = true; if (S.pos) navTick(S.pos); },
   overview: () => {
     if (!S.navRoute) return;
     closeNavMenu();
@@ -1942,6 +1968,7 @@ const ACT = {
   },
   toggleVoice: () => { renderNavMenu(); $('nav-menu').hidden = false; document.body.classList.add('nav-menu-open'); },
   simSpeed: () => { if (!S.sim) return; const f = [1, 3, 8]; S.sim.factor = f[(f.indexOf(S.sim.factor) + 1) % f.length]; showSimStatus(); },
+  retryLocation:()=>{S.geoError=null;if(S.nav)S.follow=true;positionSource.retry().then(()=>{if(S.nav)navHealth();else renderWherePill();});},
   locate: () => {
     if (!S.pos) { toast('Konumun bekleniyor…'); return; }
     const tilt = store.prefs.tilt;
@@ -2065,12 +2092,13 @@ function boot() {
   render();
   requestAnimationFrame(() => sheet.set('half', false));
   setTimeout(() => { fitScreen(); sheet.set(sheet.detent, false); }, 400);
-  if(hasServerAPI())fetch('/api/services').then(r=>r.ok?r.json():{}).then(services=>{S.services=services;if(S.mapReady){setFlow();loadIncidents(true);}if(S.view==='home')render();}).catch(()=>{});
+  refreshServices();
   voice.init();
   initMap();
   if(new URLSearchParams(location.search).get('diagnostics')==='1'){S.diagnostics=true;$('diagnostics').hidden=false;}
   if (PREVIEW) onPos({ lon: 27.1045, lat: 38.3695, acc: 8, speed: 0, heading: null, t: Date.now() });
   else startGeo();
+  setInterval(()=>{if(!PREVIEW&&!S.sim&&!document.hidden)positionSource.check();},1000);
   setInterval(() => {
     checkTheme();if(S.view==='routes'&&!S.nav){const scroll=sheet.body.scrollTop;render();sheet.body.scrollTop=scroll;}
     if (S.view === 'home' && !S.nav) { refreshHello(); if (sheet.detent === 'peek') { const sc = sheet.body.scrollTop; render(); sheet.body.scrollTop = sc; } }
@@ -2082,7 +2110,7 @@ function boot() {
 boot();
 
 // Geliştirme ve test için
-window.__yolcu = { S, store, onPos, replayPos:p=>onPos(p,true), startNav, sheet, diagnostics, fixes, replanner, endNav, navTick, roadside };
+window.__yolcu = { S, store, onPos, replayPos:p=>onPos(p,true), startNav, sheet, diagnostics, fixes, positionSource, replanner, endNav, navTick, roadside };
 
 function previewScreen(screen){
   if(!S.mapReady){S.pendingPreview=screen;return;}

@@ -1,0 +1,100 @@
+{
+  "recordedAt": "2026-11-15T12:35:49.903Z",
+  "scope": "local workerd runtime with the managed environment HTTP proxy adapter; real provider HTTP; public Izmir test points; not public deployment and not physical GPS",
+  "checks": [
+    {
+      "operation": "gateway-health",
+      "status": 200,
+      "cors": "http://127.0.0.1:4173",
+      "elapsedMs": 26
+    },
+    {
+      "operation": "owner-session",
+      "status": 200,
+      "cors": "http://127.0.0.1:4173",
+      "elapsedMs": 24
+    },
+    {
+      "operation": "services",
+      "status": 200,
+      "cors": "http://127.0.0.1:4173",
+      "elapsedMs": 6,
+      "configured": {
+        "traffic": true,
+        "ai": true,
+        "gateway": true
+      }
+    },
+    {
+      "operation": "traffic-nearby-fuel",
+      "status": 200,
+      "cors": "http://127.0.0.1:4173",
+      "elapsedMs": 264,
+      "results": 15,
+      "publicExamples": [
+        "Bpet",
+        "Cbk Akaryakıt",
+        "7 Kıta - Egelioğlu Petrol"
+      ]
+    },
+    {
+      "operation": "traffic-nearby-market",
+      "status": 200,
+      "cors": "http://127.0.0.1:4173",
+      "elapsedMs": 115,
+      "results": 15,
+      "publicExamples": [
+        "Dadaş Gıda Avm",
+        "Kaplan Market 1",
+        "Ali Pehlivanoğlu"
+      ]
+    },
+    {
+      "operation": "traffic-route",
+      "status": 200,
+      "cors": "http://127.0.0.1:4173",
+      "elapsedMs": 183,
+      "summary": {
+        "seconds": 1598,
+        "meters": 30752
+      }
+    },
+    {
+      "operation": "traffic-vector-tile",
+      "status": 200,
+      "cors": "http://127.0.0.1:4173",
+      "elapsedMs": 215,
+      "bytes": 28337
+    },
+    {
+      "operation": "provider-model-catalog",
+      "status": 200,
+      "cors": "http://127.0.0.1:4173",
+      "elapsedMs": 588,
+      "models": 27
+    },
+    {
+      "operation": "durable-model-selection",
+      "status": 200,
+      "cors": "http://127.0.0.1:4173",
+      "elapsedMs": 225
+    },
+    {
+      "operation": "persisted-model-status",
+      "status": 200,
+      "cors": "http://127.0.0.1:4173",
+      "elapsedMs": 8,
+      "model": "gemini-3-flash"
+    },
+    {
+      "operation": "provider-text-interpretation",
+      "status": 200,
+      "cors": "http://127.0.0.1:4173",
+      "elapsedMs": 1543,
+      "needs": [
+        "fuel",
+        "cafe"
+      ]
+    }
+  ]
+}

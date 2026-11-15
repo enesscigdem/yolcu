@@ -1,0 +1,7 @@
+# Copy to .dev.vars for local development only. Never commit actual values.
+APP_PASSWORD=""
+SESSION_SECRET=""
+TOMTOM_API_KEY=""
+AI_API_KEY=""
+# Optional: fixes the model and disables selection in the application.
+# AI_MODEL=""
