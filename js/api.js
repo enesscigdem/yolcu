@@ -1,6 +1,6 @@
 import {routeSeconds,hasFreshTraffic} from './timing.js';
 // Ücretsiz servisler: Valhalla (rota), Photon + Nominatim (arama / adres)
-import { decode6, cumulative, sameRoute, pointAt, sliceAlong } from './geo.js';
+import { decode6, cumulative, sameRoute, pointAt, sliceAlong, dist } from './geo.js';
 import { story } from './guide.js';
 
 const VALHALLA = 'https://valhalla1.openstreetmap.de';
@@ -52,7 +52,7 @@ export async function search(q, near, signal) {
   if (near) { params.set('lat', near.lat.toFixed(5)); params.set('lon', near.lon.toFixed(5)); params.set('location_bias_scale', '0.3'); }
   let list = [];
   try {
-    const j = await fetch(`${PHOTON}/api/?${params}`, { signal }).then(r => r.json());
+    const j = await fetch(`${PHOTON}/api/?${params}`, { signal:boundedSignal(signal,5000) }).then(r => r.json());
     list = (j.features || []).map(photonToPlace);
   } catch (e) { if (e.name === 'AbortError') throw e; }
   // Ayıklama: aynı isim + adres tekrarlarını at
@@ -64,7 +64,7 @@ export async function search(q, near, signal) {
 // Photon bulamazsa (ör. "2996 Sokak") Nominatim ile tek seferlik dene
 export async function searchFallback(q, signal) {
   const params = new URLSearchParams({ q, format: 'jsonv2', countrycodes: 'tr', limit: '8', addressdetails: '1', 'accept-language': 'tr' });
-  const j = await fetch(`${NOMINATIM}/search?${params}`, { signal }).then(r => r.json());
+  const j = await nominatimRequest(`${NOMINATIM}/search?${params}`, signal).then(r => r.json());
   return j.map(x => {
     const a = x.address || {};
     const name = x.name || [a.road, a.house_number].filter(Boolean).join(' No:') || x.display_name.split(',')[0];
@@ -77,7 +77,7 @@ export async function searchFallback(q, signal) {
 // "Neredeyim" için ters adres: cadde + mahalle + ilçe
 export async function reverse(lat, lon, signal) {
   const params = new URLSearchParams({ lat, lon, format: 'jsonv2', zoom: '17', addressdetails: '1', 'accept-language': 'tr' });
-  const j = await fetch(`${NOMINATIM}/reverse?${params}`, { signal }).then(r => r.json());
+  const j = await nominatimRequest(`${NOMINATIM}/reverse?${params}`, signal).then(r => r.json());
   const a = j.address || {};
   return {
     road: a.road || a.pedestrian || a.highway || null,
@@ -384,23 +384,53 @@ export const CATEGORIES = [
   { id: 'market', label: 'Market', tiles: ['grocery'], tt: '7332', tag: '"shop"="supermarket"', r: 2500, fallback: 'Market', kind: 'shop' },
   { id: 'hospital', label: 'Hastane', tiles: ['hospital'], tt: null, tag: '"amenity"="hospital"', r: 8000, fallback: 'Hastane', kind: 'health' }
 ];
-const OVERPASS = ['https://maps.mail.ru/osm/tools/overpass/api/interpreter', 'https://overpass-api.de/api/interpreter'];
-// Konumun çevresindeki gerçek mekanlar (OpenStreetMap etiketleriyle, isimsiz olanlar dahil)
-export async function nearby(cat, near, signal) {
-  const q = `[out:json][timeout:15];nwr[${cat.tag}](around:${cat.r},${near.lat.toFixed(5)},${near.lon.toFixed(5)});out center 60;`;
-  let j = null, err;
-  for (const url of OVERPASS) {
-    try {
-      const r = await fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(q), headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, signal });
-      if (r.ok) { j = await r.json(); break; }
-    } catch (e) { if (e.name === 'AbortError') throw e; err = e; }
-  }
-  if (!j) throw err || new Error('Yakındakiler alınamadı');
-  return (j.elements || []).map(e => {
-    const t = e.tags || {};
-    const lat = e.lat ?? e.center?.lat, lon = e.lon ?? e.center?.lon;
-    const street = [t['addr:street'], t['addr:housenumber']].filter(Boolean).join(' No:');
-    const sub = [t.brand && t.brand !== t.name ? t.brand : null, street, t['addr:suburb'] || t['addr:district']].filter(Boolean).join(', ');
-    return { name: t.name || t.brand || cat.fallback, sub, lat, lon, kind: cat.kind, brand:t.brand||'',phone:t.phone||t['contact:phone']||'',openingText:t.opening_hours||'', diesel:t['fuel:diesel']==='yes'?true:t['fuel:diesel']==='no'?false:null };
-  }).filter(p => p.lat != null);
+const OVERPASS = ['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter'];
+const nearbyCache=new Map();let nominatimLast=0,nominatimTimer=null;const nominatimQueue=[];
+const boundedSignal=(signal,ms)=>signal?AbortSignal.any([signal,AbortSignal.timeout(ms)]):AbortSignal.timeout(ms);
+function pumpNominatim(){
+  if(nominatimTimer!==null||!nominatimQueue.length)return;
+  nominatimTimer=setTimeout(()=>{nominatimTimer=null;const next=nominatimQueue.shift();if(next){nominatimLast=Date.now();next.start();}pumpNominatim();},Math.max(0,nominatimLast+1100-Date.now()));
+}
+function nominatimSlot(signal){return new Promise((resolve,reject)=>{
+  const job={start:()=>{signal.removeEventListener('abort',abort);resolve();}};
+  const abort=()=>{const i=nominatimQueue.indexOf(job);if(i>=0)nominatimQueue.splice(i,1);reject(signal.reason||new DOMException('İptal edildi','AbortError'));if(!nominatimQueue.length&&nominatimTimer!==null){clearTimeout(nominatimTimer);nominatimTimer=null;}};
+  if(signal.aborted)return abort();signal.addEventListener('abort',abort,{once:true});nominatimQueue.push(job);pumpNominatim();
+});}
+async function nominatimRequest(url,signal){
+  signal=boundedSignal(signal,6500);await nominatimSlot(signal);signal.throwIfAborted();
+  const headers={Accept:'application/json'};if(typeof window==='undefined')headers['User-Agent']='Yolcu/2026.11 (https://github.com/enesscigdem/yolcu)';
+  const r=await fetch(url,{signal,headers});if(!r.ok)throw new Error('Adres servisi '+r.status);return r;
+}
+function nearbyFacts(rows,cat,near,radius){
+  const valid=rows.filter(p=>Number.isFinite(p.lat)&&Number.isFinite(p.lon)&&Math.abs(p.lat)<=90&&Math.abs(p.lon)<=180&&dist(near.lon,near.lat,p.lon,p.lat)<=radius&&(!cat.brand||(p.name+' '+(p.brand||'')).toLocaleLowerCase('tr-TR').includes(cat.brand.toLocaleLowerCase('tr-TR'))));
+  return valid.sort((a,b)=>dist(near.lon,near.lat,a.lon,a.lat)-dist(near.lon,near.lat,b.lon,b.lat)).filter((p,i,a)=>a.findIndex(x=>dist(x.lon,x.lat,p.lon,p.lat)<25&&x.name===p.name)===i).slice(0,30);
+}
+// Interactive category search: bounded, typed OSM facts, not a text-only guess.
+export async function nearby(cat,near,signal){
+  if(!Number.isFinite(near?.lat)||!Number.isFinite(near?.lon)||Math.abs(near.lat)>90||Math.abs(near.lon)>180)throw new Error('Güncel konum gerekli');
+  const radius=Math.max(100,Math.min(10000,cat.r||3500)),tag=String(cat.tag||'').match(/^"(amenity|shop|highway)"="([a-z_]+)"$/);
+  if(!tag)throw new Error('Arama kategorisi desteklenmiyor');
+  const key=[cat.tag,cat.brand||'',radius,near.lat.toFixed(4),near.lon.toFixed(4)].join(':');const hit=nearbyCache.get(key);
+  if(hit&&Date.now()-hit.at<60000)return structuredClone(hit.places);
+  const whole=boundedSignal(signal,16000),lat=radius/110540,lon=radius/(111320*Math.cos(near.lat*Math.PI/180));let responseSeen=false;
+  const remember=places=>{nearbyCache.set(key,{at:Date.now(),places});if(nearbyCache.size>30)nearbyCache.delete(nearbyCache.keys().next().value);return structuredClone(places);};
+  try{
+    const params=new URLSearchParams({q:'['+tag[2]+']',format:'jsonv2',addressdetails:'1',extratags:'1',limit:'40',viewbox:[near.lon-lon,near.lat+lat,near.lon+lon,near.lat-lat].join(','),bounded:'1'});
+    const r=await nominatimRequest(`${NOMINATIM}/search?${params}`,whole),j=await r.json();if(!Array.isArray(j))throw new Error('Geçersiz işletme yanıtı');responseSeen=true;
+    const places=nearbyFacts(j.filter(x=>(x.class||x.category)===tag[1]&&x.type===tag[2]).map(x=>({name:x.name||x.extratags?.brand||cat.fallback||cat.label,sub:x.display_name||'',lat:Number(x.lat),lon:Number(x.lon),kind:cat.kind,brand:x.extratags?.brand||'',phone:x.extratags?.phone||x.extratags?.['contact:phone']||'',openingText:x.extratags?.opening_hours||'',src:'osm'})),cat,near,radius);
+    if(places.length)return remember(places);
+  }catch(e){if(whole.aborted)throw e;}
+  try{
+    const params=new URLSearchParams({q:cat.brand||cat.query||cat.label||tag[2],lat:String(near.lat),lon:String(near.lon),limit:'40',osm_tag:tag[1]+':'+tag[2],bbox:[near.lon-lon,near.lat-lat,near.lon+lon,near.lat+lat].join(',')});
+    const r=await fetch(`${PHOTON}/api/?${params}`,{signal:boundedSignal(whole,5000)});if(!r.ok)throw new Error('İşletme servisi '+r.status);const j=await r.json();if(!Array.isArray(j.features))throw new Error('Geçersiz işletme yanıtı');responseSeen=true;
+    const places=nearbyFacts(j.features.filter(f=>f.geometry?.type==='Point'&&f.properties?.osm_key===tag[1]&&f.properties?.osm_value===tag[2]).map(f=>{const p=f.properties;return {name:p.name||cat.fallback||cat.label,sub:[p.street,p.housenumber,p.district,p.city].filter(Boolean).join(', '),lon:f.geometry.coordinates[0],lat:f.geometry.coordinates[1],kind:cat.kind,src:'osm'};}),cat,near,radius);
+    if(places.length)return remember(places);
+  }catch(e){if(whole.aborted)throw e;}
+  if(responseSeen)return remember([]);
+  const q=`[out:json][timeout:4];nwr[${cat.tag}](around:${radius},${near.lat.toFixed(5)},${near.lon.toFixed(5)});out center 40;`;
+  for(const url of OVERPASS)try{
+    const r=await fetch(url,{method:'POST',body:'data='+encodeURIComponent(q),headers:{'Content-Type':'application/x-www-form-urlencoded'},signal:boundedSignal(whole,4500)});if(!r.ok)continue;const j=await r.json();if(!Array.isArray(j.elements))continue;
+    return remember(nearbyFacts(j.elements.map(e=>{const t=e.tags||{};return {name:t.name||t.brand||cat.fallback||cat.label,sub:[t['addr:street'],t['addr:housenumber'],t['addr:suburb']||t['addr:district']].filter(Boolean).join(', '),lat:e.lat??e.center?.lat,lon:e.lon??e.center?.lon,kind:cat.kind,brand:t.brand||'',phone:t.phone||t['contact:phone']||'',openingText:t.opening_hours||'',src:'osm'};}),cat,near,radius));
+  }catch(e){if(whole.aborted)throw e;}
+  throw new Error('İşletme servislerine şu anda ulaşılamıyor. Yeniden dene.');
 }

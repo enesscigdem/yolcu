@@ -1,5 +1,6 @@
 // TomTom (ücretsiz katman): canlı trafik, kazalar/yol çalışmaları, trafikli süre ve işletme arama.
 // Tarayıcı yalnız aynı kaynaktaki sunucu vekilini kullanır; anahtar sunucudadır.
+import {apiURL,serviceFetch} from './backend.js';
 import { projectOnSegment, cumulative, sameRoute, bearing } from './geo.js';
 
 const API = 'https://api.tomtom.com';
@@ -7,7 +8,7 @@ async function request(url, options = {}) {
   const timeout = AbortSignal.timeout(15000);
   const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
   if(typeof window!=='undefined'){const target=new URL(url);target.searchParams.delete('key');url='/api/traffic'+target.pathname+target.search;}
-  const r = await fetch(url, { ...options, signal, referrerPolicy: 'no-referrer' });
+  const r = await (typeof window!=='undefined'?serviceFetch(url,{...options,signal,referrerPolicy:'no-referrer'}):fetch(url,{...options,signal,referrerPolicy:'no-referrer'}));
   if (!r.ok) {
     const message = r.status === 401 || r.status === 403 ? 'TomTom anahtarı veya servis yetkisi geçersiz' : r.status === 429 ? 'TomTom istek sınırına ulaşıldı; biraz sonra tekrar dene' : 'TomTom servisine ulaşılamadı';
     const info=typeof window!=='undefined'?await r.json().catch(()=>null):null;
@@ -18,7 +19,7 @@ async function request(url, options = {}) {
 
 // Vektör trafik verisi: her yol parçasında traffic_level (0 = durmuş, 1 = akıcı) ve road_closure var.
 // Kendimiz çiziyoruz: akıcı yollar boyanmaz, sadece yavaş/sıkışık/kapalı olanlar (Apple gibi).
-export const flowTiles = key => typeof window!=='undefined'?'/api/traffic/traffic/map/4/tile/flow/relative/{z}/{x}/{y}.pbf':`${API}/traffic/map/4/tile/flow/relative/{z}/{x}/{y}.pbf?key=${encodeURIComponent(key)}`;
+export const flowTiles = key => typeof window!=='undefined'?apiURL('/api/traffic/traffic/map/4/tile/flow/relative/{z}/{x}/{y}.pbf'):`${API}/traffic/map/4/tile/flow/relative/{z}/{x}/{y}.pbf?key=${encodeURIComponent(key)}`;
 
 export const CATS = {
   0: ['Olay', '⚠️'], 1: ['Kaza', '💥'], 2: ['Sis', '🌫️'], 3: ['Tehlikeli yol', '⚠️'], 4: ['Yağmur', '🌧️'],
@@ -192,6 +193,7 @@ export function bboxOf(coords, pad = 0.01) {
 export async function poiSearch(key,category,near,signal){
  const params=new URLSearchParams({key,countrySet:'TR',language:'tr-TR',limit:'15',lat:near.lat.toFixed(5),lon:near.lon.toFixed(5),radius:'3500',openingHours:'nextSevenDays',timeZone:'iana'});
  if(category.tt)params.set('categorySet',category.tt);if(category.brand)params.set('brandSet',category.brand);
- const r=await request(`${API}/search/2/poiSearch/${encodeURIComponent(category.query||category.label)}.json?${params}`,{signal});if(!r.ok)throw new Error('İşletme araması '+r.status);
+ const endpoint=category.tt&&!category.brand?'nearbySearch/':`poiSearch/${encodeURIComponent(category.query||category.label)}`;
+ const r=await request(`${API}/search/2/${endpoint}.json?${params}`,{signal});if(!r.ok)throw new Error('İşletme araması '+r.status);
  return ((await r.json()).results||[]).map(x=>({id:x.id,name:x.poi?.name||category.label,sub:x.address?.freeformAddress||'',lat:x.position.lat,lon:x.position.lon,kind:category.kind,phone:x.poi?.phone||'',brand:x.poi?.brands?.map(b=>b.name).join(', ')||'',openingHours:x.poi?.openingHours||null,timezone:x.poi?.timeZone?.ianaId||'Europe/Istanbul',diesel:null,src:'tt'}));
 }

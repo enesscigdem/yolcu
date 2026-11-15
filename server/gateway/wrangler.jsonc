@@ -1,0 +1,10 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "yolcu-gateway",
+  "main": "worker.mjs",
+  "compatibility_date": "2025-06-01",
+  "workers_dev": true,
+  "vars": { "FRONTEND_ORIGIN": "https://enesscigdem.github.io" },
+  "durable_objects": { "bindings": [{ "name": "STATE", "class_name": "GatewayState" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["GatewayState"] }]
+}

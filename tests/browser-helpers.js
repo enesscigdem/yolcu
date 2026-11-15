@@ -1,7 +1,7 @@
 import {expect} from '@playwright/test';
 import {readFileSync} from 'node:fs';
 const fixture=JSON.parse(readFileSync(new URL('./fixtures/izmir-routes.json',import.meta.url),'utf8'));
-export async function setup(page) {
+export async function setup(page,{keepGPSFresh=true,mockPlaceSources=true}={}) {
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.addInitScript(()=>{
     window.audioCalls=[];
@@ -24,11 +24,15 @@ export async function setup(page) {
   // Weather is outside these navigation/UI tests; aborting causes WebKit access-control page errors.
   await page.route('**/api.open-meteo.com/**',r=>r.fulfill({json:{current:{temperature_2m:20,weather_code:3,is_day:1},daily:{sunrise:[],sunset:[]}}}));
   await page.route('**/nominatim.openstreetmap.org/**',r=>r.fulfill({json:{address:{road:'Eski İzmir Caddesi',suburb:'Karabağlar'}}}));
+  // Recorded category scenarios exercise the Overpass fallback; live-provider
+  // checks run separately without these routes. Do not contact real providers here.
+  await page.route('**/photon.komoot.io/**',r=>new URL(r.request().url()).searchParams.has('osm_tag')?r.fulfill({status:503,json:{error:'Recorded scenario uses its Overpass fixture'}}):r.fallback());
   await page.route('**/*overpass*/**',r=>r.fulfill({json:{elements:[]}}));
-  const stationaryGPS=setInterval(()=>page.evaluate(()=>{if(window.__yolcu&&!__yolcu.S.nav)__yolcu.onPos({lon:27.1045,lat:38.3695,acc:8,speed:0,heading:null,t:Date.now()});}).catch(()=>{}),750);page.once('close',()=>clearInterval(stationaryGPS));
+  const stationaryGPS=keepGPSFresh?setInterval(()=>page.evaluate(()=>{if(window.__yolcu&&!__yolcu.S.nav)__yolcu.onPos({lon:27.1045,lat:38.3695,acc:8,speed:0,heading:null,t:Date.now()});}).catch(()=>{}),750):null;page.once('close',()=>{if(stationaryGPS)clearInterval(stationaryGPS);});
   await page.route('**/api/services',r=>r.fulfill({json:{traffic:false,ai:false}}));
   await page.goto('/');
   await page.waitForFunction(()=>window.__yolcu?.S.mapReady);
+  if(mockPlaceSources)await page.evaluate(()=>{const m=__yolcu.S.map,original=m.querySourceFeatures.bind(m);m.querySourceFeatures=(name,options)=>options?.sourceLayer==='poi'?[]:original(name,options);});
   return errors;
 }
 export async function publishGPS(page){await page.evaluate(()=>__yolcu.onPos({lon:27.1045,lat:38.3695,acc:8,speed:0,heading:null,t:Date.now()}));}

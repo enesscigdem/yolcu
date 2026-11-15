@@ -1,5 +1,5 @@
 // Tüm kişisel veriler sadece telefonda (localStorage) tutulur.
-const isPreview = typeof location !== 'undefined' && ['localhost', '127.0.0.1'].includes(location.hostname) && new URLSearchParams(location.search).get('preview') === '1';
+const isPreview = typeof location !== 'undefined' && new URLSearchParams(location.search).get('preview') === '1';
 const KEY = isPreview ? 'yolcu.preview.v1' : 'yolcu.v1';
 const CREDENTIAL_KEY = 'yolcu.tomtom.v1';
 
@@ -41,7 +41,7 @@ const DEFAULTS = {
 function load() {
   try {
     const raw = localStorage.getItem(KEY);
-    localStorage.removeItem(CREDENTIAL_KEY);
+    if(!isPreview)localStorage.removeItem(CREDENTIAL_KEY);
     if (!raw) return structuredClone(DEFAULTS);
     const d = JSON.parse(raw);
     const merged = { ...structuredClone(DEFAULTS), ...d, prefs: { ...DEFAULTS.prefs, ...(d.prefs || {}) } };
@@ -60,7 +60,7 @@ export const store = load();
 
 export function save() {
   try {
-    localStorage.removeItem(CREDENTIAL_KEY);
+    if(!isPreview)localStorage.removeItem(CREDENTIAL_KEY);
     const { tomtomKey, ...data } = store;
     localStorage.setItem(KEY, JSON.stringify(data));
     return true;

@@ -1,0 +1,72 @@
+{
+  "recordedAt": "2026-11-15T08:37:34.467Z",
+  "point": "public Izmir fixture",
+  "results": [
+    {
+      "category": "fuel",
+      "count": 13,
+      "elapsedMs": 728,
+      "places": [
+        {
+          "name": "Akaryakıt istasyonu",
+          "source": "osm",
+          "distanceM": 414
+        },
+        {
+          "name": "Opet Karabağlar",
+          "source": "osm",
+          "distanceM": 1000
+        },
+        {
+          "name": "Shell",
+          "source": "osm",
+          "distanceM": 1333
+        }
+      ]
+    },
+    {
+      "category": "market",
+      "count": 24,
+      "elapsedMs": 921,
+      "places": [
+        {
+          "name": "A101",
+          "source": "osm",
+          "distanceM": 679
+        },
+        {
+          "name": "A101",
+          "source": "osm",
+          "distanceM": 739
+        },
+        {
+          "name": "BİM",
+          "source": "osm",
+          "distanceM": 744
+        }
+      ]
+    },
+    {
+      "category": "pharmacy",
+      "count": 26,
+      "elapsedMs": 965,
+      "places": [
+        {
+          "name": "Sabır Eczanesi",
+          "source": "osm",
+          "distanceM": 355
+        },
+        {
+          "name": "Habbal Eczanesi",
+          "source": "osm",
+          "distanceM": 461
+        },
+        {
+          "name": "İlkay Eczanesi",
+          "source": "osm",
+          "distanceM": 1625
+        }
+      ]
+    }
+  ]
+}

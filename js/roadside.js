@@ -1,3 +1,4 @@
+import {serviceFetch} from './backend.js';
 import {I,KIND_ICON} from './icons.js';
 import {stopImpact,hasFreshTraffic} from './timing.js';
 import {NEEDS,needById,openingAt,normalizeDuty,optimizeStops} from './needs.js';
@@ -34,7 +35,7 @@ export class Roadside {
   this.body('',previous.title,{replace:true,view:previous.view});
   this.root.querySelector('.roadside-content').replaceWith(previous.content);previous.content.scrollTop=previous.scroll;this.syncPins();this.onPanel?.();
  }
- close(returnToParent=false){this.controller?.abort();this.assistant.cancel();this.version++;this.root.hidden=true;this.history=[];this.onResults?.([]);document.body.classList.remove('roadside-open');this.onPanel?.();this.onDismiss?.(returnToParent);}
+ close(returnToParent=false){this.controller?.abort();this.assistant.cancel();this.version++;this.busy=false;this.root.hidden=true;this.history=[];this.onResults?.([]);document.body.classList.remove('roadside-open');this.onPanel?.();this.onDismiss?.(returnToParent);}
  invalidate(){this.history=[];const hadResults=this.options.length,hadModel=!!this.assistant.controller;this.assistant.cancel();this.controller?.abort();this.version++;this.options=[];this.evaluated=null;if(!this.root.hidden&&(this.busy||hadResults||hadModel))this.message('Rota değişti. Güncel güzergâhta tekrar ara.');this.history=[];this.busy=false;}
  message(text){this.body(`<p class="rs-note" role="status">${esc(text)}</p>${btn('home','Kategorilere dön','class="btn"')}`);}
  home(){
@@ -58,12 +59,12 @@ export class Roadside {
   try{
    let find;
    if(id==='duty'){
-    const r=await fetch('/api/duty',{signal:ac.signal});if(!r.ok)throw new Error('Resmî nöbet listesi alınamadı');const j=await r.json();const places=normalizeDuty(j.rows);if(!places.length)throw new Error('Güncel nöbet kaydı bulunamadı');find=async()=>places;
+    const r=await serviceFetch('/api/duty',{signal:ac.signal});if(!r.ok)throw new Error('Resmî nöbet listesi alınamadı');const j=await r.json();const places=normalizeDuty(j.rows);if(!places.length)throw new Error('Güncel nöbet kaydı bulunamadı');find=async()=>places;
    }else find=(point,signal)=>this.findNearby(cat,point,signal);
    if(!context){
     const from=await this.position();ac.signal.throwIfAborted();
     if(!from)throw new Error('Yakındaki yerler için güncel konum gerekiyor.');
-    const list=await find(from,ac.signal);ac.signal.throwIfAborted();if(version!==this.version)return;
+    this.nearbyAccuracy=from.approximate?Math.round(from.acc):null;const list=await find(from,ac.signal);ac.signal.throwIfAborted();if(version!==this.version)return;
     const options=list.filter(p=>Number.isFinite(p.lon)&&Number.isFinite(p.lat)&&(!this.pending?.openOnly||openingAt(p).state==='open')).map(place=>({place,nearby:true,distanceM:dist(from.lon,from.lat,place.lon,place.lat)})).sort((a,b)=>a.distanceM-b.distanceM);this.evaluated={at:Date.now(),options};this.options=options.slice(this.offset,this.offset+6);
     this.optionsContext=null;this.busy=false;this.showOptions(true);return;
    }
@@ -91,7 +92,7 @@ export class Roadside {
   return `<span>İşletmeye ~${mins(o.reachSeconds)}</span><strong>${detail?'Ek sürüş':'Yolculuğa'} ${delta}</strong>`;
  }
  showOptions(replace=false){
-  this.body(`<p class="rs-note" id="rs-search-progress" role="status">${this.busy?'Yolculuk etkisi hesaplanıyor…':this.optionsContext?`${this.evaluated?.options.length||this.options.length} yer karşılaştırıldı · en az ek süre`:'Konumuna en yakın yerler'}</p>${this.options.map((o,i)=>`<article class="rs-result rs-summary">${btn('detail',`<span class="rs-number">${i+1}</span><span><h3>${esc(o.place.name)}</h3><p>${esc(o.place.sub||'Adres bilgisi yok')}</p><span class="rs-tags">${this.timing(o)}</span></span><span aria-hidden="true">›</span>`,`data-index="${i}" aria-label="${esc(o.place.name)} detayları"`)}</article>`).join('')||'<p class="rs-note">Koşullara uyan sonuç bulunamadı.</p>'}${!this.busy&&(!this.evaluated||this.offset+6<this.evaluated.options.length)?btn('moreResults','Daha fazla yer','class="btn rs-more"'):''}`,needById(this.kind)?.label||'Yakında bul',{replace,view:'results'});
+  this.body(`<p class="rs-note" id="rs-search-progress" role="status">${this.busy?'Yolculuk etkisi hesaplanıyor…':this.optionsContext?`${this.evaluated?.options.length||this.options.length} yer karşılaştırıldı · en az ek süre`:`Konumuna en yakın yerler${this.nearbyAccuracy?` · ±${this.nearbyAccuracy} m`:''}`}</p>${this.options.map((o,i)=>`<article class="rs-result rs-summary">${btn('detail',`<span class="rs-number">${i+1}</span><span><h3>${esc(o.place.name)}</h3><p>${esc(o.place.sub||'Adres bilgisi yok')}</p><span class="rs-tags">${this.timing(o)}</span></span><span aria-hidden="true">›</span>`,`data-index="${i}" aria-label="${esc(o.place.name)} detayları"`)}</article>`).join('')||'<p class="rs-note">Koşullara uyan sonuç bulunamadı.</p>'}${!this.busy&&(!this.evaluated||this.offset+6<this.evaluated.options.length)?btn('moreResults','Daha fazla yer','class="btn rs-more"'):''}`,needById(this.kind)?.label||'Yakında bul',{replace,view:'results'});
  }
  detail(index){
   if(this.view==='detail')this.back();

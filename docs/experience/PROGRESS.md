@@ -1,3 +1,5 @@
+> Sonraki navigasyon/servis arızası düzeltmeleri ayrı branch'te sürüyor: [güncel devam noktası](../recovery/PROGRESS.md). Bu dosya önceki deneyim çalışmasının kaydıdır.
+
 > **Son yönlendirme:** Kullanıcı 15 Kasım’da mevcut sürümü kabul edip main/Pages yayını istedi. Önceki branch-only ifadeleri tarihsel geliştirme sınırıdır. Yayın ve devam noktası: [RELEASE.md](RELEASE.md).
 
 # Yolcu — kalıcı ilerleme ve devam noktası

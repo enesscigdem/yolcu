@@ -10,3 +10,10 @@ artifacts/
 
 tmp/pdfs/
 output/pdf/
+
+# Gateway secrets and local Worker state
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+.wrangler/
+.secrets.deploy.json

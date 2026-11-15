@@ -25,7 +25,7 @@ test('server catalog accepts dynamic account models, persists only preference an
 }));
 test('traffic gateway injects the server credential and refuses client keys and arbitrary destinations',()=>localServer(async base=>{
  const before=process.env.TOMTOM_API_KEY,realFetch=global.fetch;process.env.TOMTOM_API_KEY='only-server-traffic-key';let calls=0;
- global.fetch=async(url,options)=>{calls++;const target=new URL(url);assert.equal(target.origin,'https://api.tomtom.com');assert.equal(target.searchParams.get('key'),'only-server-traffic-key');assert.equal(options.redirect,'error');return new Response('{"results":[]}',{headers:{'Content-Type':'application/json'}});};
+ global.fetch=async(url,options)=>{calls++;const target=new URL(url);assert.equal(target.origin,'https://api.tomtom.com');assert.equal(target.searchParams.get('key'),'only-server-traffic-key');assert.equal(options.redirect,'manual');return new Response('{"results":[]}',{headers:{'Content-Type':'application/json'}});};
  try{const r=await request(base+'/api/traffic/search/2/search/Konak.json?limit=1',{headers});assert.equal(r.status,200);assert.equal(await r.text(),'{"results":[]}');
  for(const p of ['/api/traffic/https://evil.invalid/','/api/traffic/search/2/search/Konak.json?key=client-secret','/api/traffic/not-allowed'])assert.equal((await request(base+p,{headers})).status,400);assert.equal(calls,1);
  }finally{global.fetch=realFetch;if(before===undefined)delete process.env.TOMTOM_API_KEY;else process.env.TOMTOM_API_KEY=before;}

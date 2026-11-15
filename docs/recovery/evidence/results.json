@@ -1,0 +1,195 @@
+{
+  "recordedAt": "2026-11-15T12:38:34.010Z",
+  "scope": "real Chromium app, browser-emulated Geolocation API, real business/route/map/model HTTP; local gateway; not physical iPhone or public deployment",
+  "checks": [
+    {
+      "operation": "real-nearby-fuel",
+      "results": 3,
+      "examples": [
+        "Akaryakıt istasyonu",
+        "Opet Karabağlar",
+        "Zerek Petrol"
+      ]
+    },
+    {
+      "operation": "real-nearby-market",
+      "results": 6,
+      "examples": [
+        "A101",
+        "A101",
+        "BİM",
+        "A101",
+        "Olimpiyat Market",
+        "BİM"
+      ]
+    },
+    {
+      "operation": "real-nearby-pharmacy",
+      "results": 6,
+      "examples": [
+        "Gülyaka Eczanesi",
+        "Reyhan Eczanesi",
+        "Özge Eczanesi",
+        "Yeni Yaklav Eczanesi",
+        "Zelal Eczanesi",
+        "Doruk Eczanesi"
+      ]
+    },
+    {
+      "operation": "real-valhalla-route",
+      "routes": [
+        {
+          "seconds": 2110.591,
+          "meters": 18886.894864977305
+        },
+        {
+          "seconds": 2167.019,
+          "meters": 30786.77047731901
+        },
+        {
+          "seconds": 2549.89,
+          "meters": 17431.78311674244
+        }
+      ]
+    },
+    {
+      "operation": "preview-advances",
+      "advanced": true
+    },
+    {
+      "operation": "preview-pause-status",
+      "status": "Önizleme duraklatıldı"
+    },
+    {
+      "operation": "real-browser-remote-connect",
+      "connected": true
+    },
+    {
+      "operation": "real-browser-model-catalog",
+      "models": 27
+    },
+    {
+      "operation": "session-privacy",
+      "personalKeys": [
+        "home",
+        "work",
+        "places",
+        "recents",
+        "trips",
+        "savedRoutes",
+        "avoids",
+        "activeNav",
+        "parkedCar",
+        "entrances",
+        "reminders",
+        "roadside",
+        "radars",
+        "prefs"
+      ],
+      "sessionInLocalStorage": false
+    }
+  ],
+  "http": [
+    {
+      "host": "nominatim.openstreetmap.org",
+      "path": "/reverse",
+      "status": 200
+    },
+    {
+      "host": "valhalla1.openstreetmap.de",
+      "path": "/route",
+      "status": 200
+    },
+    {
+      "host": "nominatim.openstreetmap.org",
+      "path": "/search",
+      "status": 200
+    },
+    {
+      "host": "nominatim.openstreetmap.org",
+      "path": "/search",
+      "status": 200
+    },
+    {
+      "host": "valhalla1.openstreetmap.de",
+      "path": "/route",
+      "status": 200
+    },
+    {
+      "host": "valhalla1.openstreetmap.de",
+      "path": "/route",
+      "status": 200
+    },
+    {
+      "host": "valhalla1.openstreetmap.de",
+      "path": "/trace_attributes",
+      "status": 200
+    },
+    {
+      "host": "valhalla1.openstreetmap.de",
+      "path": "/trace_attributes",
+      "status": 200
+    },
+    {
+      "host": "valhalla1.openstreetmap.de",
+      "path": "/trace_attributes",
+      "status": 200
+    },
+    {
+      "host": "valhalla1.openstreetmap.de",
+      "path": "/route",
+      "status": 200
+    },
+    {
+      "host": "127.0.0.1:8788",
+      "path": "/api/health",
+      "status": 200
+    },
+    {
+      "host": "127.0.0.1:8788",
+      "path": "/api/session",
+      "status": 200
+    },
+    {
+      "host": "127.0.0.1:8788",
+      "path": "/api/services",
+      "status": 200
+    },
+    {
+      "host": "127.0.0.1:8788",
+      "path": "/api/services",
+      "status": 200
+    },
+    {
+      "host": "127.0.0.1:8788",
+      "path": "/api/traffic/traffic/services/5/incidentDetails",
+      "status": 200
+    },
+    {
+      "host": "127.0.0.1:8788",
+      "path": "/api/traffic/traffic/map/4/tile/flow/relative/15/18850/12597.pbf",
+      "status": 200
+    },
+    {
+      "host": "127.0.0.1:8788",
+      "path": "/api/traffic/traffic/map/4/tile/flow/relative/15/18851/12596.pbf",
+      "status": 200
+    },
+    {
+      "host": "127.0.0.1:8788",
+      "path": "/api/traffic/traffic/map/4/tile/flow/relative/15/18850/12596.pbf",
+      "status": 200
+    },
+    {
+      "host": "127.0.0.1:8788",
+      "path": "/api/traffic/traffic/map/4/tile/flow/relative/15/18851/12597.pbf",
+      "status": 200
+    },
+    {
+      "host": "127.0.0.1:8788",
+      "path": "/api/ai/models",
+      "status": 200
+    }
+  ],
+  "errors": []
+}
