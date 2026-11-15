@@ -1,5 +1,5 @@
 // Yolcu service worker: uygulama dosyalarını önbelleğe alır, internet yokken de açılır
-const VERSION = 'yolcu-v13-development';
+const VERSION = 'yolcu-v14-development';
 const SHELL = [
   './', 'index.html', 'app.css', 'experience.css', 'manifest.webmanifest',
   'js/app.js', 'js/api.js', 'js/geo.js', 'js/guide.js', 'js/icons.js', 'js/mapstyle.js', 'js/nav.js', 'js/store.js',
@@ -39,7 +39,9 @@ self.addEventListener('fetch', e => {
   if (url.hostname === 'unpkg.com' || url.hostname === 'cdn.jsdelivr.net' || (url.hostname === 'tiles.openfreemap.org' && /\/(fonts|sprites|styles)\//.test(url.pathname))) {
     e.respondWith(
       caches.open('yolcu-map').then(async c => {
-        const hit = await c.match(req);
+        // Installation seeds the shell cache, including MapLibre. Reuse it on
+        // the first offline launch before the separate map cache is populated.
+        const hit = await c.match(req) || await caches.match(req);
         const net = fetch(req).then(res => { if (res.ok) c.put(req, res.clone()); return res; }).catch(() => hit);
         return hit || net;
       })

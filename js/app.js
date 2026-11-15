@@ -117,7 +117,7 @@ function fitScreen() {
 function onViewport() {
   const vv = window.visualViewport;
   if (!vv) return;
-  const kb = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+  const kb = vv.scale > 1.05 ? 0 : Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
   document.documentElement.style.setProperty('--kb', (kb > 80 ? kb : 0) + 'px');
 }
 fitScreen();
@@ -125,6 +125,7 @@ addEventListener('resize', () => { fitScreen(); S.map?.resize(); });
 addEventListener('orientationchange', () => setTimeout(() => { fitScreen(); S.map?.resize(); }, 300));
 addEventListener('scroll', () => { if (!document.activeElement?.matches?.('input')) window.scrollTo(0, 0); }, { passive: true });
 window.visualViewport?.addEventListener('resize', onViewport);
+window.visualViewport?.addEventListener('scroll', onViewport);
 document.addEventListener('focusout', () => setTimeout(() => { window.scrollTo(0, 0); onViewport(); }, 60));
 
 /* ================= Tema ================= */

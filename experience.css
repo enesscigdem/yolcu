@@ -213,3 +213,8 @@ input,textarea { -webkit-user-select:text;user-select:text; }
 [data-rs=savePlace][aria-pressed=false] { color:var(--text2); }
 [data-rs=savePlace][aria-pressed=false] svg path { fill:none;stroke:currentColor;stroke-width:1.5; }
 .rs-impact { min-height:94px;align-items:center; }
+/* Safari keeps the layout viewport behind its keyboard. Move editable panels
+   into the visible viewport; their inner content remains independently scrollable. */
+.roadside { bottom:calc(10px + var(--safe-b) + var(--kb,0px));max-height:min(56dvh,590px,calc(100dvh - var(--kb,0px) - var(--safe-t) - var(--safe-b) - 24px)); }
+.page { bottom:var(--kb,0px); }
+.page-body,.roadside-content { scroll-padding-block:16px 80px; }

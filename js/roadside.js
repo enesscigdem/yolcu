@@ -6,7 +6,12 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 const mins=s=>`${Math.max(0,Math.round(s/60))} dk`;
 const btn=(action,text,extra='')=>`<button type="button" data-rs="${action}" ${extra}>${text}</button>`;
 export class Roadside {
- constructor(deps){Object.assign(this,deps);this.assistant=new TripAssistant();this.version=0;this.cache=new Map();this.options=[];this.root=document.getElementById('roadside');this.root.addEventListener('click',e=>{const b=e.target.closest('[data-rs]');if(!b)return;e.preventDefault();this.action(b.dataset.rs,b).catch(error=>{if(error.name!=='AbortError'&&!this.root.hidden)this.message('İşlem tamamlanamadı. Tekrar deneyebilirsin.');});});this.root.addEventListener('submit',e=>e.preventDefault());this.root.addEventListener('input',e=>{if(e.target.id==='stop-dwell'){this.dwell=Math.max(0,Math.min(180,Number(e.target.value)||0));this.updateImpact();}});}
+ constructor(deps){Object.assign(this,deps);this.assistant=new TripAssistant();this.version=0;this.cache=new Map();this.options=[];this.root=document.getElementById('roadside');this.root.addEventListener('click',e=>{const b=e.target.closest('[data-rs]');if(!b)return;e.preventDefault();this.action(b.dataset.rs,b).catch(error=>{if(error.name!=='AbortError'&&!this.root.hidden)this.message('İşlem tamamlanamadı. Tekrar deneyebilirsin.');});});this.root.addEventListener('submit',e=>e.preventDefault());this.root.addEventListener('input',e=>{if(e.target.id==='stop-dwell'){this.dwell=Math.max(0,Math.min(180,Number(e.target.value)||0));this.updateImpact();}});
+  // Keep the tapped element alive through pointerup/click when timing finishes.
+  this.root.addEventListener('pointerdown',()=>{this.releaseInteraction?.();this.interaction=new Promise(resolve=>this.releaseInteraction=resolve);});
+  const release=()=>{const resolve=this.releaseInteraction;setTimeout(()=>{resolve?.();if(this.releaseInteraction===resolve){this.interaction=null;this.releaseInteraction=null;}},0);};
+  document.addEventListener('pointerup',release);document.addEventListener('pointercancel',release);window.addEventListener('blur',release);
+ }
  body(html,title=this.hasTrip?.()?'Yol üstü':'Yakında bul',{replace=false,view=''}={}){
   if(title===this.title&&view===this.view)replace=true;
   if(!replace&&!this.root.hidden){this.history ||= [];this.history.push({content:this.root.querySelector('.roadside-content'),title:this.title,view:this.view,scroll:this.root.querySelector('.roadside-content')?.scrollTop||0});}
@@ -15,6 +20,12 @@ export class Roadside {
   this.syncPins();this.onPanel?.();
  }
  syncPins(){this.onResults?.(['results','detail'].includes(this.view)?this.options:[],this.view==='detail'?this.selectedIndex:null);}
+ async finishGesture(signal){
+  if(!this.interaction)return;
+  signal.throwIfAborted();let abort;
+  try{await Promise.race([this.interaction,new Promise(resolve=>{abort=resolve;signal.addEventListener('abort',abort,{once:true});})]);}
+  finally{signal.removeEventListener('abort',abort);}
+ }
  back(){
   const previous=this.history?.pop();if(!previous)return this.close(true);
   const keepCalculation=this.view==='detail'&&previous.view==='results';
@@ -63,6 +74,7 @@ export class Roadside {
    let options;
    if(id==='parking')options=await this.parkingOptions(context,cat,ac.signal,places=>{if(ac.signal.aborted||version!==this.version)return;this.options=places.map(place=>({place,calculating:true}));this.optionsContext=context;this.showOptions(true);});
    else options=await stopOptions({...context,offset:0,allResults:true,onCandidates:places=>{if(ac.signal.aborted||version!==this.version)return;this.options=places.slice(this.offset,this.offset+6).map(place=>({place,calculating:true}));this.optionsContext=context;this.showOptions(true);},onProgress:(done,total)=>{if(ac.signal.aborted||version!==this.version)return;const progress=this.root.querySelector('#rs-search-progress');if(progress)progress.textContent=`Karşılaştırılıyor · ${done}/${total}`;},openOnly:!!this.pending?.openOnly,brands:this.store.roadside.brands||[],fuel:this.store.roadside.fuel},observed,ac.signal,this.planner);
+   await this.finishGesture(ac.signal);
    ac.signal.throwIfAborted();if(version!==this.version||this.context()?.route!==context.route)return;
    if(lists.length){this.cache.set(cacheKey,{t:Date.now(),list:lists});if(this.cache.size>12)this.cache.delete(this.cache.keys().next().value);}
    const cap=this.pending?.maxExtraMinutes;if(cap!=null)options=options.filter(x=>x.extraSeconds<=cap*60);
