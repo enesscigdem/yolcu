@@ -8,7 +8,7 @@ const btn=(action,text,extra='')=>`<button type="button" data-rs="${action}" ${e
 export class Roadside {
  constructor(deps){Object.assign(this,deps);this.assistant=new TripAssistant();this.version=0;this.cache=new Map();this.options=[];this.root=document.getElementById('roadside');this.root.addEventListener('click',e=>{const b=e.target.closest('[data-rs]');if(!b)return;e.preventDefault();this.action(b.dataset.rs,b).catch(error=>{if(error.name!=='AbortError'&&!this.root.hidden)this.message('İşlem tamamlanamadı. Tekrar deneyebilirsin.');});});this.root.addEventListener('submit',e=>e.preventDefault());this.root.addEventListener('input',e=>{if(e.target.id==='stop-dwell'){this.dwell=Math.max(0,Math.min(180,Number(e.target.value)||0));this.updateImpact();}});
   // Keep the tapped element alive through pointerup/click when timing finishes.
-  this.root.addEventListener('pointerdown',()=>{this.releaseInteraction?.();this.interaction=new Promise(resolve=>this.releaseInteraction=resolve);});
+  document.addEventListener('pointerdown',e=>{if(!e.target.closest('#roadside,.rs-map-pin'))return;this.releaseInteraction?.();this.interaction=new Promise(resolve=>this.releaseInteraction=resolve);});
   const release=()=>{const resolve=this.releaseInteraction;setTimeout(()=>{resolve?.();if(this.releaseInteraction===resolve){this.interaction=null;this.releaseInteraction=null;}},0);};
   document.addEventListener('pointerup',release);document.addEventListener('pointercancel',release);window.addEventListener('blur',release);
  }

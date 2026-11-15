@@ -139,7 +139,7 @@ function applyTheme() {
   // konum oku arazinin üstünde kayıyor; ayrıca iPhone'da navigasyon daha akıcı oluyor.
   setTerrain(S.map, !!(store.prefs.relief && store.prefs.tilt && !S.nav));
   setFlow();
-  setRouteBuildings(S.map,S.navRoute,S.nav?.along||0,diagnostics.quality);
+  setRouteBuildings(S.map,S.navRoute,S.nav?.along||0,S.nav?diagnostics.quality:0);
 }
 mq.addEventListener?.('change', applyTheme);
 

@@ -64,7 +64,7 @@ test('local phone preview switches all three screens and keeps the outer app fix
 test('navigation resources remain bounded across repeated start and end',async({page})=>{
   test.setTimeout(90000);
   const errors=await setup(page);const initial=await page.evaluate(()=>__yolcu.S.map.getStyle().layers.length);
-  for(let i=0;i<4;i++){await routes(page);await page.locator('[data-act=preview]').click();await expect(page.locator('#nav')).toBeVisible();await page.evaluate(()=>__yolcu.endNav());}
+  for(let i=0;i<4;i++){await routes(page);await page.locator('[data-act=preview]').click();await expect(page.locator('#nav')).toBeVisible();await page.evaluate(async()=>{const {S,diagnostics}=__yolcu;diagnostics.quality=2;const {setRouteBuildings}=await import('./js/mapstyle.js');setRouteBuildings(S.map,S.navRoute,0,2);__yolcu.endNav();});expect(await page.evaluate(()=>__yolcu.S.map.getStyle().layers.filter(l=>l.type==='fill-extrusion').every(l=>__yolcu.S.map.getLayoutProperty(l.id,'visibility')==='visible'))).toBe(true);}
   const state=await page.evaluate(()=>({timers:__yolcu.S.timers.length,sim:__yolcu.S.sim,raf:__yolcu.diagnostics.running,request:!!__yolcu.replanner.controller,retry:!!__yolcu.replanner.retry,layers:__yolcu.S.map.getStyle().layers.length}));
   expect(state).toEqual({timers:0,sim:null,raf:false,request:false,retry:false,layers:initial});expect(errors).toEqual([]);
 });
