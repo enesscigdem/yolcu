@@ -116,11 +116,20 @@ function fitScreen() {
   else if (standalone) html.style.height = '';
   if (window.scrollY) window.scrollTo(0, 0);
 }
+function revealInput() {
+  const el=document.activeElement,scroller=el?.closest?.('.roadside-content,.page-body,.sheet-body'),vv=window.visualViewport;
+  if(!el?.matches?.('input,textarea,select')||!scroller||vv?.scale>1.05)return;
+  const field=el.getBoundingClientRect(),panel=scroller.getBoundingClientRect();
+  const bottom=Math.min(panel.bottom,vv?vv.height+vv.offsetTop:innerHeight)-16,top=Math.max(panel.top,vv?.offsetTop||0)+16;
+  if(field.bottom>bottom)scroller.scrollTop+=field.bottom-bottom;
+  else if(field.top<top)scroller.scrollTop-=top-field.top;
+}
 function onViewport() {
   const vv = window.visualViewport;
   if (!vv) return;
   const kb = vv.scale > 1.05 ? 0 : Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
   document.documentElement.style.setProperty('--kb', (kb > 80 ? kb : 0) + 'px');
+  requestAnimationFrame(revealInput);
 }
 fitScreen();
 addEventListener('resize', () => { fitScreen(); S.map?.resize(); });
@@ -128,6 +137,7 @@ addEventListener('orientationchange', () => setTimeout(() => { fitScreen(); S.ma
 addEventListener('scroll', () => { if (!document.activeElement?.matches?.('input')) window.scrollTo(0, 0); }, { passive: true });
 window.visualViewport?.addEventListener('resize', onViewport);
 window.visualViewport?.addEventListener('scroll', onViewport);
+document.addEventListener('focusin',()=>requestAnimationFrame(revealInput));
 document.addEventListener('focusout', () => setTimeout(() => { window.scrollTo(0, 0); onViewport(); }, 60));
 
 /* ================= Tema ================= */
