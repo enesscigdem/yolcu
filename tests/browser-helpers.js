@@ -26,6 +26,7 @@ export async function setup(page) {
   await page.route('**/nominatim.openstreetmap.org/**',r=>r.fulfill({json:{address:{road:'Eski İzmir Caddesi',suburb:'Karabağlar'}}}));
   await page.route('**/*overpass*/**',r=>r.fulfill({json:{elements:[]}}));
   const stationaryGPS=setInterval(()=>page.evaluate(()=>{if(window.__yolcu&&!__yolcu.S.nav)__yolcu.onPos({lon:27.1045,lat:38.3695,acc:8,speed:0,heading:null,t:Date.now()});}).catch(()=>{}),750);page.once('close',()=>clearInterval(stationaryGPS));
+  await page.route('**/api/services',r=>r.fulfill({json:{traffic:false,ai:false}}));
   await page.goto('/');
   await page.waitForFunction(()=>window.__yolcu?.S.mapReady);
   return errors;

@@ -11,20 +11,20 @@ export const ACCENT = '#C95D36';
 
 export const PALETTES = {
   light: {
-    land: '#E6E1D7', residential: '#E1DCD2', park: '#C5D0B2', wood: '#B5C3A2', water: '#A9CDE6', sand: '#EDE5CF', ice: '#FFFFFF',
-    building: '#CEC7BA', building3d: '#DDD7CB', building3dTall: '#BFB8AB', hospital: '#F0E1DF', school: '#ECE6D8', aeroway: '#E6E3DC',
+    land: '#EEECE4', residential: '#E9E6DD', park: '#C5D0B2', wood: '#B5C3A2', water: '#BCD0D3', sand: '#EDE5CF', ice: '#FFFFFF',
+    building: '#D5D0C4', building3d: '#DDD7CB', building3dTall: '#BFB8AB', hospital: '#F0E1DF', school: '#ECE6D8', aeroway: '#E6E3DC',
     // Binalar arasında çok hafif ton farkı (hepsi aynı kutu gibi durmasın)
     bTones: ['#DED8CC', '#D3CDBF', '#DAD2C4'], poiBg: '#FFFFFF', poiFg: '#4A4A4F',
     motorway: '#F6E2B8', motorwayCase: '#D7B87A', primary: '#FFFFFF', primaryCase: '#CFC9BE',
     secondary: '#FFFFFF', secondaryCase: '#D7D2C9', minor: '#FFFFFF', minorCase: '#DFDAD2', path: '#E3DED4', rail: '#CFCAC0',
     navRoad: '#FFFFFF', navRoadCase: '#D6D0C6', navMotorway: '#F4DFB5',
-    label: '#2E2E31', district: '#86868B', roadLabel: '#58585D', waterLabel: '#4A7FA8', poiLabel: '#6C6C71', halo: '#FFFFFF', boundary: '#C5C0CF',
+    label: '#2E2E31', district: '#86868B', roadLabel: '#505A52', waterLabel: '#4A7FA8', poiLabel: '#6C6C71', halo: '#FFFFFF', boundary: '#C5C0CF',
     route: '#CE653C', routeCase: '#A44B2B', alt: '#AAA8A5', altCase: '#878580', arrow: '#FFFFFF', arrowCase: '#1C1D20',
     shade: '#47523F', highlight: '#FFFFFF', shadeK: 0.45,
-    sky: '#C9DCEB', horizon: '#F2F1EC', fog: '#EFEDE8', light: 0.42
+    sky: '#D8E1DF', horizon: '#F2F1EC', fog: '#EFEDE8', light: 0.42
   },
   dark: {
-    land: '#252729', residential: '#292B2D', park: '#1B2820', wood: '#19261E', water: '#0F2234', sand: '#2B2A25', ice: '#34363B',
+    land: '#252729', residential: '#292B2D', park: '#1B2820', wood: '#19261E', water: '#142B2D', sand: '#2B2A25', ice: '#34363B',
     building: '#25272B', building3d: '#3E4144', building3dTall: '#505356', hospital: '#2D2427', school: '#2A2925', aeroway: '#24252A',
     bTones: ['#34383B', '#303437', '#3B3F42'], poiBg: '#26282D', poiFg: '#C9C9CE',
     motorway: '#4A4436', motorwayCase: '#2E2A21', primary: '#3A3C42', primaryCase: '#242529',
@@ -58,6 +58,7 @@ export async function loadStyle() {
         lay['text-font'] = ['Noto Sans Regular'];
       }
     }
+    if(l['source-layer']==='transportation_name'&&l.type==='symbol'){lay['text-padding']=4;lay['text-size']=['interpolate',['linear'],['zoom'],13,10,16,12,18,14];}
     if (l.id === 'building') l.minzoom = 14;
     if (l.id === 'building-3d') l.minzoom = 14;
     if(l.type==='symbol') { l.paint ||= {}; l.paint['text-opacity-transition']={duration:450}; }
@@ -86,7 +87,7 @@ export async function loadStyle() {
   style.sources.sat = { type: 'raster', tiles: [SAT_URL], tileSize: 256, maxzoom: 19, attribution: 'Uydu © Esri, Maxar' };
   const waterIdx = style.layers.findIndex(l => l.id === 'water' || l['source-layer'] === 'water');
   style.layers.splice(waterIdx, 0, {
-    id: 'yolcu-hillshade', type: 'hillshade', source: 'dem', maxzoom: 16,
+    id: 'yolcu-hillshade', type: 'hillshade', source: 'dem', maxzoom: 16, layout:{visibility:'none'},
     paint: { 'hillshade-exaggeration': 0.45, 'hillshade-shadow-color': '#47523F', 'hillshade-highlight-color': '#FFFFFF', 'hillshade-illumination-direction': 315 }
   });
   style.layers.splice(1, 0, { id: 'yolcu-sat', type: 'raster', source: 'sat', layout: { visibility: 'none' }, paint: { 'raster-fade-duration': 150, 'raster-contrast': 0.1, 'raster-saturation': 0.05, 'raster-resampling': 'linear' } });
@@ -97,7 +98,7 @@ export async function loadStyle() {
 export function setTerrain(map, on) {
   try {
     const cur = map.getTerrain && map.getTerrain();
-    if (on && !cur) map.setTerrain({ source: 'dem3d', exaggeration: 1.2 });
+    if (on && !cur) map.setTerrain({ source: 'dem3d', exaggeration: 1.0 });
     else if (!on && cur) map.setTerrain(null);
   } catch { }
 }
@@ -148,7 +149,7 @@ export function applyPalette(map, P, opts = {}) {
       set(id, 'fill-extrusion-opacity', nav ? .86 : .94);
       set(id, 'fill-extrusion-height-transition', {duration:650});
       set(id, 'fill-extrusion-vertical-gradient', true);
-      set(id, 'fill-extrusion-height', ['interpolate', ['linear'], ['zoom'], 14, 0, 16.2, ['max', 4, ['coalesce', ['get', 'render_height'], 6]]]);
+      set(id, 'fill-extrusion-height', ['interpolate', ['linear'], ['zoom'], 14, 0, 16.2, ['max',0,['to-number',['get','render_height'],0]]]);
       set(id, 'fill-extrusion-base', ['interpolate', ['linear'], ['zoom'], 14, 0, 16.2, ['coalesce', ['get', 'render_min_height'], 0]]);
       continue;
     }
@@ -183,7 +184,7 @@ export function applyPalette(map, P, opts = {}) {
     }
   }
   vis('yolcu-sat', sat);
-  vis('yolcu-hillshade', !sat);
+  vis('yolcu-hillshade', !sat && !!opts.relief && !nav);
   vis('yolcu-poi', !nav);
   set('yolcu-poi', 'text-color', sat ? '#FFFFFF' : P.poiLabel);
   set('yolcu-poi', 'text-halo-color', sat ? 'rgba(0,0,0,.7)' : P.halo);
@@ -225,12 +226,12 @@ export function setRouteBuildings(map,route,along=0,quality=0) {
   }
   for(const layer of map.getStyle().layers){
     if(layer.type==='fill-extrusion'){
-      const h=['max',4,['coalesce',['get','render_height'],6]];
+      const h=['max',0,['to-number',['get','render_height'],0]];
       const target=polygons.length?['case',['within',{type:'MultiPolygon',coordinates:polygons}],0,h]:h;
-      const value=quality>=2?0:['interpolate',['linear'],['zoom'],quality?15:14,0,16.2,target];
-      map.setPaintProperty(layer.id,'fill-extrusion-height',value);
+      const value=quality>=1?0:['interpolate',['linear'],['zoom'],quality?15:14,0,16.2,target];
+      if((map.getLayoutProperty(layer.id,'visibility')||'visible')!==(quality>=1?'none':'visible'))map.setLayoutProperty(layer.id,'visibility',quality>=1?'none':'visible');map.setPaintProperty(layer.id,'fill-extrusion-height',value);map.setPaintProperty(layer.id,'fill-extrusion-base',quality>=1?0:['interpolate',['linear'],['zoom'],14,0,16.2,['coalesce',['get','render_min_height'],0]]);
     }
-    if(layer.type==='symbol'&&layer['source-layer']==='place')map.setPaintProperty(layer.id,'text-opacity',route? .45 : 1);
+    if(layer.type==='symbol'&&layer['source-layer']==='place'){if((map.getLayoutProperty(layer.id,'visibility')||'visible')!==(route&&quality>=2?'none':'visible'))map.setLayoutProperty(layer.id,'visibility',route&&quality>=2?'none':'visible');map.setPaintProperty(layer.id,'text-opacity',route? .45 : 1);}
     if(layer.type==='symbol'&&layer['source-layer']==='transportation_name'&&/minor|path/.test(layer.id))map.setPaintProperty(layer.id,'text-opacity',quality? .6:1);
   }
 }

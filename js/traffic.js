@@ -1,22 +1,24 @@
 // TomTom (ücretsiz katman): canlı trafik, kazalar/yol çalışmaları, trafikli süre ve işletme arama.
-// Anahtar sadece telefonda saklanır (Ayarlar › Trafik).
+// Tarayıcı yalnız aynı kaynaktaki sunucu vekilini kullanır; anahtar sunucudadır.
 import { projectOnSegment, cumulative, sameRoute, bearing } from './geo.js';
 
 const API = 'https://api.tomtom.com';
 async function request(url, options = {}) {
   const timeout = AbortSignal.timeout(15000);
   const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
+  if(typeof window!=='undefined'){const target=new URL(url);target.searchParams.delete('key');url='/api/traffic'+target.pathname+target.search;}
   const r = await fetch(url, { ...options, signal, referrerPolicy: 'no-referrer' });
   if (!r.ok) {
     const message = r.status === 401 || r.status === 403 ? 'TomTom anahtarı veya servis yetkisi geçersiz' : r.status === 429 ? 'TomTom istek sınırına ulaşıldı; biraz sonra tekrar dene' : 'TomTom servisine ulaşılamadı';
-    const error = new Error(`${message} (${r.status})`); error.status = r.status; throw error;
+    const info=typeof window!=='undefined'?await r.json().catch(()=>null):null;
+    const error = new Error(typeof info?.error==='string'?info.error:`${message} (${r.status})`); error.status = r.status; throw error;
   }
   return r;
 }
 
 // Vektör trafik verisi: her yol parçasında traffic_level (0 = durmuş, 1 = akıcı) ve road_closure var.
 // Kendimiz çiziyoruz: akıcı yollar boyanmaz, sadece yavaş/sıkışık/kapalı olanlar (Apple gibi).
-export const flowTiles = key => `${API}/traffic/map/4/tile/flow/relative/{z}/{x}/{y}.pbf?key=${encodeURIComponent(key)}`;
+export const flowTiles = key => typeof window!=='undefined'?'/api/traffic/traffic/map/4/tile/flow/relative/{z}/{x}/{y}.pbf':`${API}/traffic/map/4/tile/flow/relative/{z}/{x}/{y}.pbf?key=${encodeURIComponent(key)}`;
 
 export const CATS = {
   0: ['Olay', '⚠️'], 1: ['Kaza', '💥'], 2: ['Sis', '🌫️'], 3: ['Tehlikeli yol', '⚠️'], 4: ['Yağmur', '🌧️'],
@@ -92,7 +94,7 @@ export async function routeTraffic(key, route, signal) {
     trafficTime: Math.round(sum.travelTimeInSeconds),
     trafficCheckedAt: Date.now(),
     trafficLengthM: sum.lengthInMeters,
-    trafficDelay: Math.max(0, sum.trafficDelayInSeconds || 0),
+    trafficDelay: Number.isFinite(sum.trafficDelayInSeconds)?Math.max(0,sum.trafficDelayInSeconds):null,
     trafficRatio: route.time > 0 ? sum.travelTimeInSeconds / route.time : 1,
     jams
   };
@@ -105,8 +107,8 @@ export async function quickEta(key, from, to, signal) {
   const r = await request(url, { signal });
   if (!r.ok) throw new Error('Süre ' + r.status);
   const s = (await r.json()).routes?.[0]?.summary;
-  if (!s) throw new Error('Süre boş');
-  return { time: s.travelTimeInSeconds, delay: s.trafficDelayInSeconds || 0, lengthM: s.lengthInMeters };
+  if (!s||!Number.isFinite(s.travelTimeInSeconds)||s.travelTimeInSeconds<0) throw new Error('Süre doğrulanamadı');
+  return { time: s.travelTimeInSeconds, delay: Number.isFinite(s.trafficDelayInSeconds)?Math.max(0,s.trafficDelayInSeconds):null, lengthM: s.lengthInMeters };
 }
 
 // Kategoriye göre yakındaki mekanlar (benzinlik, otopark, kafe, market)

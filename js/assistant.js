@@ -1,5 +1,5 @@
 import {localIntent,validateIntent} from './needs.js';
-export const RELEASE = '2026.11.14.1';
+export const RELEASE = '2026.11.15.1';
 export const SERVER_UNAVAILABLE = 'Bu yayında yapay zekâ sunucusu henüz bağlı değil. Cihazda komut çözümleme ve normal kategori aramaları kullanılabilir.';
 export function hasServerAPI(hostname=globalThis.location?.hostname||''){return !hostname.toLowerCase().endsWith('.github.io');}
 export class TripAssistant {

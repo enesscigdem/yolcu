@@ -1,0 +1,21 @@
+{
+  "name": "chromium-map-label",
+  "commit": "a5c00f4",
+  "scope": "marker label correction",
+  "stats": {
+    "startTime": "2026-11-15T07:31:51.018Z",
+    "duration": 14436.26,
+    "expected": 1,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  },
+  "tests": [
+    {
+      "title": "finishing stop timing during a pointer gesture preserves the intended business tap via map",
+      "project": "chromium",
+      "status": "passed",
+      "attempts": 1
+    }
+  ]
+}

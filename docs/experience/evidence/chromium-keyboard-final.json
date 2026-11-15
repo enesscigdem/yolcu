@@ -1,0 +1,51 @@
+{
+  "name": "chromium-keyboard-final",
+  "commit": "91114cf",
+  "scope": "six focused keyboard/input/offline regressions",
+  "stats": {
+    "startTime": "2026-11-15T07:40:53.500Z",
+    "duration": 45758.56,
+    "expected": 6,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  },
+  "tests": [
+    {
+      "title": "search, business detail and route back keep the query and calling screen",
+      "project": "chromium",
+      "status": "passed",
+      "attempts": 1
+    },
+    {
+      "title": "model selection uses a dynamic server catalog and handles a model lock without invented choices",
+      "project": "chromium",
+      "status": "passed",
+      "attempts": 1
+    },
+    {
+      "title": "adding a pinned place from personal places returns to its calling settings section",
+      "project": "chromium",
+      "status": "passed",
+      "attempts": 1
+    },
+    {
+      "title": "installed shell and MapLibre can launch offline without caching private API responses",
+      "project": "chromium",
+      "status": "passed",
+      "attempts": 1
+    },
+    {
+      "title": "keyboard-sized visual viewport leaves editable panels and controls reachable with safe areas",
+      "project": "chromium",
+      "status": "passed",
+      "attempts": 1
+    },
+    {
+      "title": "personal preferences, park note, reminders and personal payment flags survive reload",
+      "project": "chromium",
+      "status": "passed",
+      "attempts": 1
+    }
+  ]
+}

@@ -26,3 +26,6 @@ test('authorization and quota failures are actionable and never include the cred
   const actual=fetch;
   try { for(const status of [403,429]) {globalThis.fetch=async()=>new Response('{}',{status});await assert.rejects(traffic.search(fakeKey,'kahve',{lon:27.142,lat:38.423}),e=>e.status===status&&!e.message.includes(fakeKey));} }finally{globalThis.fetch=actual;}
 });
+test('a missing or malformed quick ETA is rejected and unknown delay is not reported as free flow',async()=>{
+ const actual=fetch;try{for(const value of [undefined,'200',-5]){globalThis.fetch=async()=>json({routes:[{summary:{travelTimeInSeconds:value}}]});await assert.rejects(traffic.quickEta(fakeKey,{lat:38,lon:27},{lat:38.1,lon:27.1}),/doğrulanamadı/);}globalThis.fetch=async()=>json({routes:[{summary:{travelTimeInSeconds:200,lengthInMeters:3000}}]});const r=await traffic.quickEta(fakeKey,{lat:38,lon:27},{lat:38.1,lon:27.1});assert.equal(r.time,200);assert.equal(r.delay,null);}finally{globalThis.fetch=actual;}
+});

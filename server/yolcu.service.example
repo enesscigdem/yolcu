@@ -1,0 +1,23 @@
+# Review and adapt paths/user before installing; nothing enables this service automatically.
+[Unit]
+Description=Yolcu private application backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=yolcu
+WorkingDirectory=/srv/yolcu
+ExecStart=/usr/bin/node --env-file=/etc/yolcu/environment server/dev.mjs
+StateDirectory=yolcu
+Environment=AI_PREFERENCES_PATH=/var/lib/yolcu/ai-preferences.json
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/yolcu
+
+[Install]
+WantedBy=multi-user.target

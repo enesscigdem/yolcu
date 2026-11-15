@@ -1,0 +1,15 @@
+{
+  "environment": "chromium",
+  "viewport": "390x844, headless desktop browser, map tiles over network",
+  "wallSampleSeconds": 12,
+  "metrics": {
+    "fixAgeMs": 2,
+    "processingP95Ms": 4.400000000139698,
+    "renderP95Ms": 16.200000000186265,
+    "frameP50Ms": 83.30000000000291,
+    "frameP95Ms": 233.39999999999964,
+    "quality": 1,
+    "frameSamples": 177,
+    "memoryMB": 28
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "name": "chromium-surface-final",
+  "commit": "5677406",
+  "scope": "final surface regressions",
+  "stats": {
+    "startTime": "2026-11-15T07:51:34.259Z",
+    "duration": 23724.072999999997,
+    "expected": 3,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  },
+  "tests": [
+    {
+      "title": "adding a pinned place from personal places returns to its calling settings section",
+      "project": "chromium",
+      "status": "passed",
+      "attempts": 1
+    },
+    {
+      "title": "keyboard-sized visual viewport leaves editable panels and controls reachable with safe areas",
+      "project": "chromium",
+      "status": "passed",
+      "attempts": 1
+    },
+    {
+      "title": "nearby places work without a route; detail, pins and back preserve context",
+      "project": "chromium",
+      "status": "passed",
+      "attempts": 1
+    }
+  ]
+}

@@ -1,3 +1,4 @@
+import {routeSeconds,hasFreshTraffic} from './timing.js';
 // Ücretsiz servisler: Valhalla (rota), Photon + Nominatim (arama / adres)
 import { decode6, cumulative, sameRoute, pointAt, sliceAlong } from './geo.js';
 import { story } from './guide.js';
@@ -235,7 +236,7 @@ function scoreRoute(r, prefs) {
     r.score = s;
     return;
   }
-  let s = (r.trafficTime || r.time) + r.turns * 10;
+  let s = routeSeconds(r) + r.turns * 10;
   if (a) {
     s += a.small * 0.05;
     s += a.rough * (prefs.rough ? 0.4 : 0.05);
@@ -315,13 +316,13 @@ export async function planRoutes(from, to, prefs, avoids, signal, travel = 'auto
 
 export function rankRoutes(routes, prefs) {
   // A comparison cannot mix live TomTom timings with a different engine's base times.
-  if (routes.some(r => r.trafficUnavailable) && routes.some(r => r.trafficCheckedAt)) {
+  if (routes.some(r => !hasFreshTraffic(r)) && routes.some(r => r.trafficTime)) {
     for (const r of routes) {
       for (const k of ['trafficTime', 'trafficDelay', 'trafficRatio', 'trafficCheckedAt', 'trafficLengthM', 'jams']) delete r[k];
       r.trafficUnavailable = true;
     }
   }
-  const tt = r => r.trafficTime || r.time;
+  const tt = r => routeSeconds(r);
   const fastest = routes.reduce((a, b) => tt(b) < tt(a) ? b : a);
   const budget = Math.max(0, Math.min(20, Number(prefs.maxExtraMinutes) || 0)) * 60;
   routes.forEach(r => { scoreRoute(r, prefs); delete r.best; delete r.fastest; });

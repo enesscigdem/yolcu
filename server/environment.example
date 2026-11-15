@@ -1,0 +1,8 @@
+# Install outside the checkout with owner-only permissions. Empty fields are intentional.
+APP_ORIGIN=https://yolcu.example.com
+YOLCU_GATEWAY_TOKEN=
+TOMTOM_API_KEY=
+AI_API_KEY=
+AI_BASE_URL=https://yapayzekalab.org/v1
+AI_PREFERENCES_PATH=/var/lib/yolcu/ai-preferences.json
+# Leave AI_MODEL unset to allow the authenticated application to select an account model.

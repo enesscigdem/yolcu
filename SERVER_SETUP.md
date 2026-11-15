@@ -1,5 +1,7 @@
 # Yolcu sunucusu ve YapayZekaLab bağlantısı
 
+> **Geliştirme branch’i için güncel rehber:** [güvenli backend mimarisi](docs/experience/BACKEND.md). Aşağıdaki 14 Kasım notları önceki sürümün tarihsel doğrulamasıdır. Güncel sürümde katalog Ayarlar → Yapay zekâ ve modeller ekranında doğrudan alınır; seçim ayrı `ai-preferences.json` dosyasına yalnız model kimliği olarak yazılır. TomTom sunucu vekilindedir; tarayıcıya anahtar girilmez.
+
 14 Kasım 2026. Ön yüzün 2026.11.14.1 sürümü GitHub Pages için hazırlandı. Model ve resmî eczane API katmanı henüz internete dağıtılmadı; Pages üzerinde bu kontroller açıklamalı olarak devre dışıdır. Yerel geliştirme sunucusu çalışıyor. `npm start` Node 22+ ile statik uygulamayı ve aynı kaynaktaki küçük API katmanını birlikte sunar. Model çağrıları GPS, kamera ve yeniden rota hesaplamasının parçası değildir.
 
 ## Yerel yapılandırma

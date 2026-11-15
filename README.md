@@ -26,9 +26,9 @@ Ev, iş, favoriler, park konumu, geçmiş ve yol tercihleri cihazda saklanır. G
 
 ## Telefona kurulum
 
-Güncel statik yayın: <https://enesscigdem.github.io/yolcu/>. Sürüm: **2026.11.14.1** (Ayarlar → Hakkında).
+Statik yayın adresi: <https://enesscigdem.github.io/yolcu/>. Bu kodun sürümü: **2026.11.15.1** (Ayarlar → Hakkında). Yayın doğrulama durumu: [yayın günlüğü](docs/experience/RELEASE.md).
 
-GitHub Pages harita, rota, duraklar, park, geçmiş/favoriler ve cihazda yazılı komut çözümlemeyi sunar. TomTom trafik ve işletme araması için anahtarı iPhone'daki Ayarlar'a ayrıca gir; Mac'in yerel ayarı telefona taşınmaz. Anahtar yayına veya kaynak koda eklenmez.
+GitHub Pages harita, rota, duraklar, park, geçmiş/favoriler ve cihazda yazılı komut çözümlemeyi sunar. Bu geliştirme branch’inde TomTom trafik ve işletme araması yalnız güvenli sunucu bağlantısıyla kullanılabilir; anahtar tarayıcıya girilmez. Mevcut statik yayının davranışı bu branch tarafından değiştirilmez. Anahtar yayına veya kaynak koda eklenmez.
 
 Bu yayında sunucu henüz bağlı olmadığı için YapayZekaLab model çağrısı ve resmî nöbetçi eczane listesi kullanılamaz; arayüz bunu açıkça belirtir. Normal eczane ve diğer kategoriler kullanılabilir. Mac kapalıyken statik yayın çalışır; harita/rota/arama internet gerektirir.
 
@@ -73,7 +73,7 @@ node tools/live-check.mjs
 node tools/check-tomtom.mjs # isteğe bağlı; yerel TomTom anahtarı gerektirir
 ```
 
-TomTom anahtarı tarayıcıdaki yerel bağlantı ayarında tutulur; yedeklere ve paylaşım bağlantılarına eklenmez. CLI testi anahtarı `TOMTOM_API_KEY` ortam değişkeninden veya depo dışındaki `~/.config/yolcu/tomtom.json` dosyasından okur. Gerçek anahtarı kaynak dosyalarına yazmayın.
+TomTom anahtarı sunucunun `TOMTOM_API_KEY` ortam değişkeninde tutulur. Tarayıcı yalnız aynı kaynaktaki `/api/traffic/` vekilini kullanır; eski tarayıcı anahtar kayıtları temizlenir. CLI testi anahtarı `TOMTOM_API_KEY` ortam değişkeninden veya depo dışındaki `~/.config/yolcu/tomtom.json` dosyasından okur. Gerçek anahtarı kaynak dosyalarına yazmayın.
 
 Tarayıcı testleri 14 Kasım 2026 tarihinde canlı Valhalla'dan kaydedilmiş açık İzmir güzergâhlarıyla tekrarlanabilir kontroller yapar; harita karoları ağdan yüklenir. `node tools/live-check.mjs --update-fixture` rota örneklerini yeniler. Güncel senaryo ve performans ölçümleri [güvenilirlik raporunda](RELIABILITY_REPORT.md); önceki servis doğrulamaları [doğrulama notlarında](TEST_NOTES.md).
 
@@ -101,6 +101,10 @@ node tools/check-reroute.mjs
 İkinci komut özel yerel anahtarla gerçek rota ve trafik servislerini çağırır; anahtar veya tam istek adresi yazdırmaz. Çıktılar Git dışındaki `artifacts/` klasörüne kaydedilir. Navigasyonda menüden benzinlik/otopark eklenebilir; ek süre tam başlangıç–durak–hedef rotasıyla hesaplanır. Varışta **Bu güzergâhı beğendim** aynı hedef için tercihi saklar; sonraki planlama bunu mevcut süre sınırı ve kapanma verisiyle yeniden değerlendirir.
 
 
-**Yol üstü:** Yakıt, Migros/market, tekel, eczane/nöbetçi eczane, ATM, yemek, kahve, tuvalet, otopark, lastikçi ve akücü. Önce üç sonuç; ek sürüş gerçek tam rota farkından gelir, durakta kalma süresi ayrı seçilir. En fazla üç durak düzenlenebilir; sıralar yol ağı üzerinden karşılaştırılabilir. Parka araçla, ardından hedefe yürüyerek devam edilebilir. Motorin/marka tercihleri, kişisel Multinet işaretleri, asistans telefonu, hedefe bağlı hatırlatmalar ve araç girişleri yerelde tutulur. Saat/doluluk bilinmiyorsa açık veya müsait iddiası yapılmaz.
+**Yol üstü:** Yakıt, Migros/market, tekel, eczane/nöbetçi eczane, ATM, yemek, kahve, tuvalet, otopark, lastikçi ve akücü. Beş rota örnekleme noktasından en fazla 12 aday karşılaştırılır, sayfada altı sonuç gösterilir; ek sürüş gerçek tam rota farkından gelir, durakta kalma süresi ayrı seçilir. En fazla üç durak düzenlenebilir; sıralar yol ağı üzerinden karşılaştırılabilir. Parka araçla, ardından hedefe yürüyerek devam edilebilir. Motorin/marka tercihleri, kişisel Multinet işaretleri, asistans telefonu, hedefe bağlı hatırlatmalar ve araç girişleri yerelde tutulur. Saat/doluluk bilinmiyorsa açık veya müsait iddiası yapılmaz.
 
 YapayZekaLab kurulumu, model testi, HTTPS dağıtım gereksinimleri ve Umber karşılaştırması: [Sunucu bağlantısı](SERVER_SETUP.md). Yerel komut çözümleme ve kategori düğmeleri model olmadan kullanılabilir. Mikrofon eklenmedi; yazıyla kullanım hazırdır.
+
+## Bütün uygulama geliştirmesi ve yayın durumu
+
+`dc9e562` üzerine yapılan geliştirme kapsamı, doğrulama ve kalan işler: [kalıcı ilerleme dosyası](docs/experience/PROGRESS.md). Gerçek iPhone sürüş onayı henüz yoktur. Kullanıcının mevcut sürümü yayınlama isteği ve işlem sonucu [yayın günlüğünde](docs/experience/RELEASE.md) izlenir. [Güvenli backend çalıştırma](docs/experience/BACKEND.md) tüm uygulamanın aynı HTTPS kaynaktan sunulmasını esas alır. GitHub Pages sunucu çalıştırmaz.

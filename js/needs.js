@@ -1,3 +1,4 @@
+import {hasFreshTraffic} from './timing.js';
 // Only facts from search/routing/duty services become place cards. Intent output has no factual fields.
 export const NEEDS = [
  {id:'fuel',label:'Yakıt',icon:'⛽',query:'akaryakıt',tt:'7311',tag:'"amenity"="fuel"',kind:'fuel'},
@@ -64,5 +65,5 @@ export async function optimizeStops(context,planner,signal){
  const list=context.stops;if(list.length<2)return {stops:list,route:null};
  const perms=a=>a.length<2?[a]:a.flatMap((p,i)=>perms(a.filter((_,j)=>j!==i)).map(b=>[p,...b]));
  const results=[];for(const stops of perms(list).slice(0,6)){signal?.throwIfAborted();const routes=await planner(context.from,context.to,context.prefs,context.avoids,signal,context.route.mode||'auto',context.traffic,null,stops);results.push({stops,route:routes[0]});}
- const live=results.every(x=>x.route.trafficCheckedAt);results.sort((a,b)=>(live?a.route.trafficTime-b.route.trafficTime:a.route.time-b.route.time)||a.route.lengthM-b.route.lengthM);return results[0];
+ const live=results.every(x=>hasFreshTraffic(x.route));results.sort((a,b)=>(live?a.route.trafficTime-b.route.trafficTime:a.route.time-b.route.time)||a.route.lengthM-b.route.lengthM);return results[0];
 }

@@ -1,15 +1,15 @@
 // Yolcu service worker: uygulama dosyalarını önbelleğe alır, internet yokken de açılır
-const VERSION = 'yolcu-v12';
+const VERSION = 'yolcu-v15-2026.11.15.1';
 const SHELL = [
-  './', 'index.html', 'app.css', 'manifest.webmanifest',
+  './', 'index.html', 'app.css', 'experience.css', 'manifest.webmanifest',
   'js/app.js', 'js/api.js', 'js/geo.js', 'js/guide.js', 'js/icons.js', 'js/mapstyle.js', 'js/nav.js', 'js/store.js',
-  'js/traffic.js', 'js/radar.js', 'js/audio.js', 'js/location.js', 'js/replan.js', 'js/diagnostics.js', 'js/stops.js', 'js/needs.js', 'js/assistant.js', 'js/roadside.js', 'data/radars-tr.json',
+  'js/traffic.js', 'js/radar.js', 'js/audio.js', 'js/location.js', 'js/replan.js', 'js/diagnostics.js', 'js/stops.js', 'js/needs.js', 'js/assistant.js', 'js/roadside.js', 'js/timing.js', 'data/radars-tr.json',
   'icons/komur-180.png', 'icons/mavi-180.png', 'icons/yol-180.png', 'icons/harita-180.png', 'icons/gece-180.png', 'icons/y-180.png'
 ];
 const CDN = ['https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js', 'https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css'];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(VERSION).then(c => c.addAll([...SHELL, ...CDN])).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(VERSION).then(c => c.addAll([...SHELL, ...CDN])));
 });
 
 self.addEventListener('activate', e => {
@@ -39,7 +39,9 @@ self.addEventListener('fetch', e => {
   if (url.hostname === 'unpkg.com' || url.hostname === 'cdn.jsdelivr.net' || (url.hostname === 'tiles.openfreemap.org' && /\/(fonts|sprites|styles)\//.test(url.pathname))) {
     e.respondWith(
       caches.open('yolcu-map').then(async c => {
-        const hit = await c.match(req);
+        // Installation seeds the shell cache, including MapLibre. Reuse it on
+        // the first offline launch before the separate map cache is populated.
+        const hit = await c.match(req) || await caches.match(req);
         const net = fetch(req).then(res => { if (res.ok) c.put(req, res.clone()); return res; }).catch(() => hit);
         return hit || net;
       })

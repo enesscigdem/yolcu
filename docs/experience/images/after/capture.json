@@ -1,0 +1,87 @@
+{
+  "label": "after",
+  "base": "91114cf",
+  "viewport": "440x956 CSS px",
+  "timezone": "Europe/Istanbul",
+  "data": "recorded public Izmir routes/businesses; live map; live server model catalog",
+  "screens": {
+    "home": {
+      "zoom": 15.6,
+      "pitch": 0,
+      "tilesLoaded": true,
+      "roadLabels": 2
+    },
+    "home-3d": {
+      "zoom": 15.8,
+      "pitch": 48,
+      "tilesLoaded": true,
+      "roadLabels": 2
+    },
+    "search": {
+      "zoom": 15.8,
+      "pitch": 0,
+      "tilesLoaded": true,
+      "roadLabels": 1
+    },
+    "settings": {
+      "zoom": 15.8,
+      "pitch": 0,
+      "tilesLoaded": true,
+      "roadLabels": 1
+    },
+    "models": {
+      "zoom": 15.8,
+      "pitch": 0,
+      "tilesLoaded": true,
+      "roadLabels": 1
+    },
+    "routes": {
+      "zoom": 10.687875836422041,
+      "pitch": 0,
+      "tilesLoaded": true,
+      "roadLabels": 11
+    },
+    "navigation": {
+      "zoom": 10.687875836422041,
+      "pitch": 0,
+      "tilesLoaded": true,
+      "roadLabels": 11
+    },
+    "roadside": {
+      "zoom": 10.687875836422041,
+      "pitch": 0,
+      "tilesLoaded": true,
+      "roadLabels": 11
+    },
+    "results": {
+      "zoom": 10.687875836422041,
+      "pitch": 0,
+      "tilesLoaded": true,
+      "roadLabels": 11
+    },
+    "place": {
+      "zoom": 16,
+      "pitch": 0,
+      "tilesLoaded": true,
+      "roadLabels": 0
+    },
+    "personal-places": {
+      "zoom": 15.5,
+      "pitch": 0,
+      "tilesLoaded": true,
+      "roadLabels": 1
+    },
+    "settings-dark": {
+      "zoom": 15.5,
+      "pitch": 0,
+      "tilesLoaded": true,
+      "roadLabels": 1
+    },
+    "home-dark": {
+      "zoom": 15.5,
+      "pitch": 0,
+      "tilesLoaded": true,
+      "roadLabels": 1
+    }
+  }
+}

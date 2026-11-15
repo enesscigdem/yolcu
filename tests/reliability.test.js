@@ -54,3 +54,7 @@ test('sustained slow frames reduce visual density and stop cancels the only RAF'
  const oldRAF=global.requestAnimationFrame,oldCancel=global.cancelAnimationFrame,queue=new Map();let id=0;global.requestAnimationFrame=cb=>{queue.set(++id,cb);return id;};global.cancelAnimationFrame=i=>queue.delete(i);
  try{const d=new Diagnostics(),levels=[];d.start(n=>levels.push(n));d.start();assert.equal(queue.size,1);for(let t=40;t<=60000;t+=40){const [i,cb]=queue.entries().next().value;queue.delete(i);cb(t);assert.equal(queue.size,1);}assert.deepEqual(levels,[1,2]);d.stop();assert.equal(queue.size,0);}finally{global.requestAnimationFrame=oldRAF;global.cancelAnimationFrame=oldCancel;}
 });
+test('very slow rendering adapts before collecting 120 frames',()=>{
+ const oldRAF=global.requestAnimationFrame,oldCancel=global.cancelAnimationFrame,queue=new Map();let id=0;global.requestAnimationFrame=cb=>{queue.set(++id,cb);return id;};global.cancelAnimationFrame=i=>queue.delete(i);
+ try{const d=new Diagnostics(),levels=[];d.start(n=>levels.push(n));for(let t=150;t<=10000;t+=150){const [i,cb]=queue.entries().next().value;queue.delete(i);cb(t);}assert.ok(d.frames.length<120);assert.deepEqual(levels,[1]);d.stop();assert.equal(queue.size,0);}finally{global.requestAnimationFrame=oldRAF;global.cancelAnimationFrame=oldCancel;}
+});

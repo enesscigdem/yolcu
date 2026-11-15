@@ -1,0 +1,132 @@
+{
+  "recordedAt": "2026-11-15T07:58:37.552Z",
+  "baseline": "dc9e562a14b33cfc198d64f397267cef8e956617",
+  "branch": "feat/yolcu-complete-experience",
+  "appCommit": "c78cc0e",
+  "check": {
+    "passed": true,
+    "proof": "evidence/check.txt"
+  },
+  "unit": {
+    "passed": 59,
+    "failed": 0,
+    "proof": "evidence/unit.txt"
+  },
+  "browserRuns": [
+    {
+      "name": "chromium-resumed",
+      "commit": "d1fe98f",
+      "scope": "full suite",
+      "passed": 32,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "durationSeconds": 445.6,
+      "proof": "evidence/chromium-resumed.json"
+    },
+    {
+      "name": "chromium-last",
+      "commit": "864f168",
+      "scope": "targeted; accessible marker label failure retained",
+      "passed": 2,
+      "failed": 1,
+      "skipped": 0,
+      "flaky": 0,
+      "durationSeconds": 54.9,
+      "proof": "evidence/chromium-last.json"
+    },
+    {
+      "name": "chromium-map-label",
+      "commit": "a5c00f4",
+      "scope": "marker label correction",
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "durationSeconds": 14.4,
+      "proof": "evidence/chromium-map-label.json"
+    },
+    {
+      "name": "webkit-resumed",
+      "commit": "a5c00f4",
+      "scope": "full suite; keyboard failure retained",
+      "passed": 32,
+      "failed": 1,
+      "skipped": 0,
+      "flaky": 0,
+      "durationSeconds": 274.9,
+      "proof": "evidence/webkit-resumed.json"
+    },
+    {
+      "name": "chromium-keyboard-final",
+      "commit": "91114cf",
+      "scope": "six focused keyboard/input/offline regressions",
+      "passed": 6,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "durationSeconds": 45.8,
+      "proof": "evidence/chromium-keyboard-final.json"
+    },
+    {
+      "name": "webkit-complete",
+      "commit": "91114cf",
+      "scope": "full suite",
+      "passed": 33,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "durationSeconds": 278.1,
+      "proof": "evidence/webkit-complete.json"
+    },
+    {
+      "name": "chromium-surface-final",
+      "commit": "5677406",
+      "scope": "final surface regressions",
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "durationSeconds": 23.7,
+      "proof": "evidence/chromium-surface-final.json"
+    },
+    {
+      "name": "webkit-surface-final",
+      "commit": "5677406",
+      "scope": "final surface regressions",
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "durationSeconds": 18.1,
+      "proof": "evidence/webkit-surface-final.json"
+    },
+    {
+      "name": "chromium-release",
+      "commit": "c78cc0e",
+      "scope": "release offline shell smoke",
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "durationSeconds": 8.4,
+      "proof": "evidence/chromium-release.json"
+    }
+  ],
+  "limits": {
+    "physicalIPhoneTested": false,
+    "realGPSDrivingTested": false,
+    "historical344CauseProven": false,
+    "backendDeployed": false,
+    "mainMerged": false,
+    "livePublished": false
+  },
+  "pullRequest": {
+    "created": false,
+    "reason": "Post https://api.github.com/graphql: Forbidden; api.github.com is excluded by the restricted environment network policy",
+    "branchURL": "https://github.com/enesscigdem/yolcu/tree/feat/yolcu-complete-experience",
+    "creationForm": "https://github.com/enesscigdem/yolcu/pull/new/feat/yolcu-complete-experience",
+    "body": "PR.md"
+  },
+  "performanceQualification": "Headless Linux with software rendering. These samples are not physical iPhone FPS or smoothness certification. Chromium sample uses d1fe98f, WebKit sample uses 91114cf."
+}

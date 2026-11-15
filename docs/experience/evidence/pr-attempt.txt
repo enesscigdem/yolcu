@@ -1,0 +1,7 @@
+2026-11-15
+Branch push: succeeded, feat/yolcu-complete-experience at d1fe98f.
+Draft PR command: gh pr create --draft --repo enesscigdem/yolcu --base main --head feat/yolcu-complete-experience --body-file /tmp/yolcu-complete-pr.md
+Result: exit 1
+Post "https://api.github.com/graphql": Forbidden
+Observed environment policy: restricted; api.github.com is not in the allowed host list.
+No actual PR URL was returned. No merge or deployment was run.

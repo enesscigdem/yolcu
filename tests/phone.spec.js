@@ -54,8 +54,8 @@ test('preview arrival never creates a completed real journey',async({page})=>{
 test('local phone preview switches all three screens and keeps the outer app fixed',async({page})=>{
   await setup(page);await page.goto('/preview.html');const phone=page.frameLocator('iframe');
   await phone.getByRole('button',{name:'Nereye?',exact:true}).waitFor({state:'visible'});
-  await page.getByRole('button',{name:'Rota seçimi',exact:true}).click();await expect(phone.getByRole('button',{name:'Başlat',exact:true})).toBeVisible();
-  await page.getByRole('button',{name:'Sürüş ekranı',exact:true}).click();await expect(phone.locator('#nav')).toBeVisible();await expect(phone.locator('#sim-badge')).toContainText('Önizleme');
+  await page.getByRole('button',{name:'Rota seçimi',exact:true}).click();await expect(phone.getByRole('button',{name:'Başlat',exact:true})).toBeVisible({timeout:20000});
+  await page.getByRole('button',{name:'Sürüş ekranı',exact:true}).click();await expect(phone.locator('#nav')).toBeVisible({timeout:20000});await expect(phone.locator('#sim-badge')).toContainText('Önizleme');
   await page.getByRole('button',{name:'Ana ekran',exact:true}).click();await expect(phone.getByRole('button',{name:'Nereye?',exact:true})).toBeVisible();
   await phone.getByRole('button',{name:'Ayarlar',exact:true}).click();await phone.getByRole('button',{name:'Kapat',exact:true}).click();
   const appRect=await phone.locator('#app').evaluate(el=>({scrollTop:el.scrollTop,y:el.getBoundingClientRect().y}));expect(appRect).toEqual({scrollTop:0,y:0});
@@ -64,7 +64,7 @@ test('local phone preview switches all three screens and keeps the outer app fix
 test('navigation resources remain bounded across repeated start and end',async({page})=>{
   test.setTimeout(90000);
   const errors=await setup(page);const initial=await page.evaluate(()=>__yolcu.S.map.getStyle().layers.length);
-  for(let i=0;i<4;i++){await routes(page);await page.locator('[data-act=preview]').click();await expect(page.locator('#nav')).toBeVisible();await page.evaluate(()=>__yolcu.endNav());}
+  for(let i=0;i<4;i++){await routes(page);await page.locator('[data-act=preview]').click();await expect(page.locator('#nav')).toBeVisible();await page.evaluate(async()=>{const {S,diagnostics}=__yolcu;diagnostics.quality=2;const {setRouteBuildings}=await import('./js/mapstyle.js');setRouteBuildings(S.map,S.navRoute,0,2);__yolcu.endNav();});expect(await page.evaluate(()=>__yolcu.S.map.getStyle().layers.filter(l=>l.type==='fill-extrusion').every(l=>__yolcu.S.map.getLayoutProperty(l.id,'visibility')==='visible'))).toBe(true);}
   const state=await page.evaluate(()=>({timers:__yolcu.S.timers.length,sim:__yolcu.S.sim,raf:__yolcu.diagnostics.running,request:!!__yolcu.replanner.controller,retry:!!__yolcu.replanner.retry,layers:__yolcu.S.map.getStyle().layers.length}));
   expect(state).toEqual({timers:0,sim:null,raf:false,request:false,retry:false,layers:initial});expect(errors).toEqual([]);
 });

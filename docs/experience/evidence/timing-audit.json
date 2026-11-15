@@ -1,0 +1,33 @@
+{
+  "source": "recorded public İzmir fixtures; not live iPhone data",
+  "routes": [
+    {
+      "route": 1,
+      "lengthKm": 30.79,
+      "summarySeconds": 2167.019,
+      "maneuverSeconds": 2167.011,
+      "maneuverValid": true,
+      "mismatch": false,
+      "initialNavigationSeconds": 2167.019
+    },
+    {
+      "route": 2,
+      "lengthKm": 18.89,
+      "summarySeconds": 2110.591,
+      "maneuverSeconds": 2110.5840000000003,
+      "maneuverValid": true,
+      "mismatch": false,
+      "initialNavigationSeconds": 2110.591
+    },
+    {
+      "route": 3,
+      "lengthKm": 17.43,
+      "summarySeconds": 2549.89,
+      "maneuverSeconds": 2549.88,
+      "maneuverValid": true,
+      "mismatch": false,
+      "initialNavigationSeconds": 2549.89
+    }
+  ],
+  "historical344Reproduced": false
+}
