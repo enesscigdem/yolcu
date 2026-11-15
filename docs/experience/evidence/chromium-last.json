@@ -1,0 +1,33 @@
+{
+  "name": "chromium-last",
+  "commit": "864f168",
+  "scope": "targeted; accessible marker label failure retained",
+  "stats": {
+    "startTime": "2026-11-15T07:30:19.515Z",
+    "duration": 54907.664000000004,
+    "expected": 2,
+    "skipped": 0,
+    "unexpected": 1,
+    "flaky": 0
+  },
+  "tests": [
+    {
+      "title": "finishing stop timing during a pointer gesture preserves the intended business tap via list",
+      "project": "chromium",
+      "status": "passed",
+      "attempts": 1
+    },
+    {
+      "title": "finishing stop timing during a pointer gesture preserves the intended business tap via map",
+      "project": "chromium",
+      "status": "failed",
+      "attempts": 1
+    },
+    {
+      "title": "navigation resources remain bounded across repeated start and end",
+      "project": "chromium",
+      "status": "passed",
+      "attempts": 1
+    }
+  ]
+}

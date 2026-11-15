@@ -1,0 +1,21 @@
+{
+  "name": "chromium-release",
+  "commit": "c78cc0e",
+  "scope": "release offline shell smoke",
+  "stats": {
+    "startTime": "2026-11-15T07:57:22.978Z",
+    "duration": 8379.655999999999,
+    "expected": 1,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  },
+  "tests": [
+    {
+      "title": "installed shell and MapLibre can launch offline without caching private API responses",
+      "project": "chromium",
+      "status": "passed",
+      "attempts": 1
+    }
+  ]
+}

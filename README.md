@@ -26,7 +26,7 @@ Ev, iş, favoriler, park konumu, geçmiş ve yol tercihleri cihazda saklanır. G
 
 ## Telefona kurulum
 
-Güncel statik yayın: <https://enesscigdem.github.io/yolcu/>. Sürüm: **2026.11.14.1** (Ayarlar → Hakkında).
+Statik yayın adresi: <https://enesscigdem.github.io/yolcu/>. Bu kodun sürümü: **2026.11.15.1** (Ayarlar → Hakkında). Yayın doğrulama durumu: [yayın günlüğü](docs/experience/RELEASE.md).
 
 GitHub Pages harita, rota, duraklar, park, geçmiş/favoriler ve cihazda yazılı komut çözümlemeyi sunar. Bu geliştirme branch’inde TomTom trafik ve işletme araması yalnız güvenli sunucu bağlantısıyla kullanılabilir; anahtar tarayıcıya girilmez. Mevcut statik yayının davranışı bu branch tarafından değiştirilmez. Anahtar yayına veya kaynak koda eklenmez.
 
@@ -101,10 +101,10 @@ node tools/check-reroute.mjs
 İkinci komut özel yerel anahtarla gerçek rota ve trafik servislerini çağırır; anahtar veya tam istek adresi yazdırmaz. Çıktılar Git dışındaki `artifacts/` klasörüne kaydedilir. Navigasyonda menüden benzinlik/otopark eklenebilir; ek süre tam başlangıç–durak–hedef rotasıyla hesaplanır. Varışta **Bu güzergâhı beğendim** aynı hedef için tercihi saklar; sonraki planlama bunu mevcut süre sınırı ve kapanma verisiyle yeniden değerlendirir.
 
 
-**Yol üstü:** Yakıt, Migros/market, tekel, eczane/nöbetçi eczane, ATM, yemek, kahve, tuvalet, otopark, lastikçi ve akücü. Önce üç sonuç; ek sürüş gerçek tam rota farkından gelir, durakta kalma süresi ayrı seçilir. En fazla üç durak düzenlenebilir; sıralar yol ağı üzerinden karşılaştırılabilir. Parka araçla, ardından hedefe yürüyerek devam edilebilir. Motorin/marka tercihleri, kişisel Multinet işaretleri, asistans telefonu, hedefe bağlı hatırlatmalar ve araç girişleri yerelde tutulur. Saat/doluluk bilinmiyorsa açık veya müsait iddiası yapılmaz.
+**Yol üstü:** Yakıt, Migros/market, tekel, eczane/nöbetçi eczane, ATM, yemek, kahve, tuvalet, otopark, lastikçi ve akücü. Beş rota örnekleme noktasından en fazla 12 aday karşılaştırılır, sayfada altı sonuç gösterilir; ek sürüş gerçek tam rota farkından gelir, durakta kalma süresi ayrı seçilir. En fazla üç durak düzenlenebilir; sıralar yol ağı üzerinden karşılaştırılabilir. Parka araçla, ardından hedefe yürüyerek devam edilebilir. Motorin/marka tercihleri, kişisel Multinet işaretleri, asistans telefonu, hedefe bağlı hatırlatmalar ve araç girişleri yerelde tutulur. Saat/doluluk bilinmiyorsa açık veya müsait iddiası yapılmaz.
 
 YapayZekaLab kurulumu, model testi, HTTPS dağıtım gereksinimleri ve Umber karşılaştırması: [Sunucu bağlantısı](SERVER_SETUP.md). Yerel komut çözümleme ve kategori düğmeleri model olmadan kullanılabilir. Mikrofon eklenmedi; yazıyla kullanım hazırdır.
 
-## Bütün uygulama geliştirmesi (yayınlanmadı)
+## Bütün uygulama geliştirmesi ve yayın durumu
 
-`dc9e562` üzerine yapılan geliştirme kapsamı, doğrulama ve kalan işler: [kalıcı ilerleme dosyası](docs/experience/PROGRESS.md). Bu branch gerçek iPhone onayı almamış geliştirme sürümüdür; main’e otomatik birleştirme veya telefon yayını yapılmaz. [Güvenli backend çalıştırma](docs/experience/BACKEND.md) tüm uygulamanın aynı HTTPS kaynaktan sunulmasını esas alır. GitHub Pages sunucu çalıştırmaz.
+`dc9e562` üzerine yapılan geliştirme kapsamı, doğrulama ve kalan işler: [kalıcı ilerleme dosyası](docs/experience/PROGRESS.md). Gerçek iPhone sürüş onayı henüz yoktur. Kullanıcının mevcut sürümü yayınlama isteği ve işlem sonucu [yayın günlüğünde](docs/experience/RELEASE.md) izlenir. [Güvenli backend çalıştırma](docs/experience/BACKEND.md) tüm uygulamanın aynı HTTPS kaynaktan sunulmasını esas alır. GitHub Pages sunucu çalıştırmaz.

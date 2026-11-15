@@ -1,0 +1,207 @@
+{
+  "name": "chromium-resumed",
+  "commit": "d1fe98f",
+  "scope": "full suite",
+  "stats": {
+    "startTime": "2026-11-15T07:22:22.759Z",
+    "duration": 445569.824,
+    "expected": 32,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  },
+  "tests": [
+    {
+      "title": "search, business detail and route back keep the query and calling screen",
+      "project": "chromium",
+      "status": "passed",
+      "attempts": 1
+    },
+    {
+      "title": "settings subflows return to settings and canceling an address does not leak pick mode",
+      "project": "chromium",
+      "status": "passed",
+      "attempts": 1
+    },
+    {
+      "title": "model selection uses a dynamic server catalog and handles a model lock without invented choices",
+      "project": "chromium",
+      "status": "passed",
+      "attempts": 1
+    },
+    {
+      "title": "browser traffic requests never send a provider credential and legacy credential storage is cleared",
+      "project": "chromium",
+      "status": "passed",
+      "attempts": 1
+    },
+    {
+      "title": "home favorites and primary controls fit narrow and large phones in both themes",
+      "project": "chromium",
+      "status": "passed",
+      "attempts": 1
+    },
+    {
+      "title": "dwell updates total arrival impact once and result selection survives map/list changes",
+      "project": "chromium",
+      "status": "passed",
+      "attempts": 1
+    },
+    {
+      "title": "a static or failed model endpoint does not invent choices or prevent routing; leaving cancels stale catalog UI",
+      "project": "chromium",
+      "status": "passed",
+      "attempts": 1
+    },
+    {
+      "title": "canceling resume cannot carry old stops or dwell into another journey; dwell can be ended explicitly",
+      "project": "chromium",
+      "status": "passed",
+      "attempts": 1
+    },
+    {
+      "title": "adding a pinned place from personal places returns to its calling settings section",
+      "project": "chromium",
+      "status": "passed",
+      "attempts": 1
+    },
+    {
+      "title": "terrain detail is optional and independent from 3D buildings",
+      "project": "chromium",
+      "status": "passed",
+      "attempts": 1
+    },
+    {
+      "title": "real candidate pins appear before route timing and back preserves an ongoing calculation and dwell",
+      "project": "chromium",
+      "status": "passed",
+      "attempts": 1
+    },
+    {
+      "title": "expired traffic returns every alternative to the same clock without changing the selected route",
+      "project": "chromium",
+      "status": "passed",
+      "attempts": 1
+    },
+    {
+      "title": "finishing stop timing during a pointer gesture preserves the intended business tap",
+      "project": "chromium",
+      "status": "passed",
+      "attempts": 1
+    },
+    {
+      "title": "home, route choice and settings fit phone sizes and preserve silent preference",
+      "project": "chromium",
+      "status": "passed",
+      "attempts": 1
+    },
+    {
+      "title": "vehicle stays at the shared GPS position during camera motion; drag releases follow",
+      "project": "chromium",
+      "status": "passed",
+      "attempts": 1
+    },
+    {
+      "title": "completed journeys, favorite geometry and avoided segments persist through reload",
+      "project": "chromium",
+      "status": "passed",
+      "attempts": 1
+    },
+    {
+      "title": "preview arrival never creates a completed real journey",
+      "project": "chromium",
+      "status": "passed",
+      "attempts": 1
+    },
+    {
+      "title": "local phone preview switches all three screens and keeps the outer app fixed",
+      "project": "chromium",
+      "status": "passed",
+      "attempts": 1
+    },
+    {
+      "title": "navigation resources remain bounded across repeated start and end",
+      "project": "chromium",
+      "status": "passed",
+      "attempts": 1
+    },
+    {
+      "title": "fuel stop adds and removes a real multi-leg route while preserving avoids",
+      "project": "chromium",
+      "status": "passed",
+      "attempts": 1
+    },
+    {
+      "title": "live browser diagnostic sample and GPS loss recovery",
+      "project": "chromium",
+      "status": "passed",
+      "attempts": 1
+    },
+    {
+      "title": "installed shell and MapLibre can launch offline without caching private API responses",
+      "project": "chromium",
+      "status": "passed",
+      "attempts": 1
+    },
+    {
+      "title": "keyboard-sized visual viewport leaves editable panels and controls reachable with safe areas",
+      "project": "chromium",
+      "status": "passed",
+      "attempts": 1
+    },
+    {
+      "title": "personal preferences, park note, reminders and personal payment flags survive reload",
+      "project": "chromium",
+      "status": "passed",
+      "attempts": 1
+    },
+    {
+      "title": "two stops add, reorder, and skip with three real route legs and retained avoidance",
+      "project": "chromium",
+      "status": "passed",
+      "attempts": 1
+    },
+    {
+      "title": "slow model and pending search leave GPS and maneuvers running; obsolete results cannot overwrite replan",
+      "project": "chromium",
+      "status": "passed",
+      "attempts": 1
+    },
+    {
+      "title": "roadside panels fit small phones and preserve maneuver visibility",
+      "project": "chromium",
+      "status": "passed",
+      "attempts": 1
+    },
+    {
+      "title": "recorded entrance is created from the map, persists and is used for the saved destination",
+      "project": "chromium",
+      "status": "passed",
+      "attempts": 1
+    },
+    {
+      "title": "official duty cards exclude expired dates and keep unknown hours explicit",
+      "project": "chromium",
+      "status": "passed",
+      "attempts": 1
+    },
+    {
+      "title": "parking makes a car route and explicitly hands off to a pedestrian destination after parking",
+      "project": "chromium",
+      "status": "passed",
+      "attempts": 1
+    },
+    {
+      "title": "nearby places work without a route; detail, pins and back preserve context",
+      "project": "chromium",
+      "status": "passed",
+      "attempts": 1
+    },
+    {
+      "title": "map selection retains results and stop duration and never shows minus zero",
+      "project": "chromium",
+      "status": "passed",
+      "attempts": 1
+    }
+  ]
+}

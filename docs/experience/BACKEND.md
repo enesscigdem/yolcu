@@ -28,6 +28,8 @@ Artık katalog model seçilmeden alınabilir. Çok kipli modeller yalnız `modal
 
 Gizli değişkenlerin değerleri açığa çıkarılmadan mevcut bağlantılar kullanıldı. Gerçek katalog 25 model döndürdü. Önceki çalışmada tercih edilen `gemini-3-flash` katalogda bulundu ve seçildi. Açık “Motorin alıp kahve içmek istiyorum” cümlesi model üzerinden `fuel` ve `cafe` olarak çözüldü; tek istekte yaklaşık 1,9 saniye. TomTom için Konak araması aynı kaynaklı vekilden HTTP 200 ve bir sonuç döndürdü. Bunlar bütün modellerin, trafik karolarının veya fiziksel navigasyonun doğrulandığı anlamına gelmez.
 
+15 Kasım devam oturumunda aynı güvenli uçlar yeniden denendi: katalog güncel olarak **27 model**, durum ve TomTom Konak araması yine HTTP 200. Katalog sayısı sağlayıcı tarafından değişebilir.
+
 ## Yayın öncesi
 
 HTTPS alanı/DNS, Caddy erişim hesabı, gateway sırrı ve sunucu sürecinin sürekliliği işletmeci tarafından sağlanmalıdır. Gerçek iPhone/Safari/PWA ile GPS, ETA, ses/Bluetooth, yeniden rota, safe-area ve uzun oturum doğrulaması gereklidir. Servis worker yeni sürümü açık sürüş oturumunun ortasında zorla etkinleştirmez; normal tarayıcı bekleme yaşam döngüsünü kullanır.

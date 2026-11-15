@@ -1,0 +1,27 @@
+{
+  "verifiedAt": "2026-11-15T07:23:01.973Z",
+  "checks": [
+    {
+      "operation": "/api/services",
+      "status": 200
+    },
+    {
+      "operation": "/api/ai/status",
+      "status": 200,
+      "configured": true,
+      "model": "gemini-3-flash"
+    },
+    {
+      "operation": "/api/ai/models",
+      "status": 200,
+      "configured": true,
+      "model": "gemini-3-flash",
+      "models": 27
+    },
+    {
+      "operation": "traffic-search",
+      "status": 200,
+      "results": 1
+    }
+  ]
+}

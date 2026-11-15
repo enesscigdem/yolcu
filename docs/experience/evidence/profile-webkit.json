@@ -1,0 +1,15 @@
+{
+  "environment": "webkit",
+  "viewport": "390x844, headless desktop browser, map tiles over network",
+  "wallSampleSeconds": 12,
+  "metrics": {
+    "fixAgeMs": 4,
+    "processingP95Ms": 8,
+    "renderP95Ms": 48,
+    "frameP50Ms": 34,
+    "frameP95Ms": 75,
+    "quality": 1,
+    "frameSamples": 381,
+    "memoryMB": null
+  }
+}
