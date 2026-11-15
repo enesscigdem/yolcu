@@ -221,3 +221,6 @@ input,textarea { -webkit-user-select:text;user-select:text; }
 /* A discovery dialog owns the bottom surface; retain the underlying sheet's
    state while letting the map, rather than duplicate home cards, surround it. */
 .roadside-open #sheet { visibility:hidden;pointer-events:none; }
+.rs-dwell-presets { display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin:10px 0 4px; }
+.rs-dwell-presets button { min-height:44px;padding:8px 4px;border:1px solid var(--line);border-radius:12px;background:var(--s1);font-size:12px; }
+.rs-dwell-presets button[aria-pressed=true] { border-color:var(--accent);background:var(--accent-soft);color:var(--accent);font-weight:650; }

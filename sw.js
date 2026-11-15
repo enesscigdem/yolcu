@@ -1,5 +1,5 @@
 // Yolcu service worker: uygulama dosyalarını önbelleğe alır, internet yokken de açılır
-const VERSION = 'yolcu-v15-2026.11.15.1';
+const VERSION = 'yolcu-v16-stop-comfort-development';
 const SHELL = [
   './', 'index.html', 'app.css', 'experience.css', 'manifest.webmanifest',
   'js/app.js', 'js/api.js', 'js/geo.js', 'js/guide.js', 'js/icons.js', 'js/mapstyle.js', 'js/nav.js', 'js/store.js',

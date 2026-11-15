@@ -56,7 +56,7 @@ const roadside=new Roadside({store,save,planner:api.planRoutes,canPark:()=>!S.si
  },
  onFocus:p=>{if(!p||!S.mapReady)return;if(S.nav)S.follow=false;S.map.easeTo({center:[p.lon,p.lat],zoom:16,padding:{top:S.nav?160:30,bottom:$('roadside').getBoundingClientRect().height+30,left:24,right:24},duration:500});},
  isSaved,onEditPinned:id=>{const origin=S.sideReturnSettings;roadside.close();S.pickPlacesReturnSettings=origin;S.pickFor=id;S.pickReturnPlaces=true;openSearch();},
- savePlace:p=>{if(!isSaved(p))toggleSaved(p);},
+ savePlace:p=>toggleSaved(p),
  onPickEntrance:p=>{if(S.nav)return toast('Araç girişi kaydetmek için sürüşü bitir');S.entranceGoal={...p};roadside.close();goHome();sheet.set('peek');S.map?.easeTo({center:[p.lon,p.lat],zoom:17,pitch:0,duration:700});toast('Haritada araç girişine basılı tut, ardından Giriş olarak kaydet seç',6000);},
  onDismiss:back=>{const settings=S.sideReturnSettings;S.sideReturnSettings=false;if(back&&settings)ACT.openSettings();},
  onPanel:()=>{if(S.nav&&S.pos)navTick({...S.pos,_received:performance.now()});},
