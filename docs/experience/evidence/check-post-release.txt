@@ -1,0 +1,5 @@
+
+> yolcu@1.0.0 check
+> node tools/check.mjs
+
+JavaScript syntax, HTML IDs and service-worker shell OK

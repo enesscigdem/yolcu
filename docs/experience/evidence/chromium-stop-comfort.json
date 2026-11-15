@@ -1,0 +1,12 @@
+{
+  "commit": "bf97bb2",
+  "stats": {
+    "startTime": "2026-11-15T08:03:43.698Z",
+    "duration": 19125.531,
+    "expected": 1,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  },
+  "scope": "One-tap dwell, manual duration, favorite add/remove, map selection, unchanged route before explicit add, actual stop dwell"
+}

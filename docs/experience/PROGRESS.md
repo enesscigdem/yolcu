@@ -106,3 +106,7 @@ Tam WebKit turu `a5c00f4` üzerinde **32/33**: yalnız klavye testi başarısız
 `91114cf` GitHub’a gönderildi. Son odaklı Chromium turu **6/6 geçti (45,8 sn)**: arama/işletme geri bağlamı, model seçimi, kişisel yer düzenlemesi, ilk çevrimdışı PWA açılışı, klavye/safe-area/pinch ve kişisel tercihlerin kalıcılığı. Aynı commit için son tam WebKit turu devam ediyor. Son birim testleri yine 59/59; kod/HTML/SW kontrolü başarılı.
 
 Son görünüm `5677406`: keşif paneli açıkken arkadaki ana ekran yüzeyi gizlenir, kapanınca detent/scroll/ekran bağlamı aynen görünür. Chromium 3/3 ve WebKit 3/3 geçti. `c78cc0e` yayın numarası/SW namespace hazırlığı; birim 59/59 ve kod kontrolü başarılı.
+
+## Main güncellemesinden sonraki somut geliştirme
+
+`feat/post-release-stop-comfort` üzerinde `bf97bb2`: hızlı 0/5/10/15 dk duraklama ve geri alınabilir favori yıldızı. Yeni senaryo Chromium 1/1 ve WebKit 1/1; birim 59/59. Yeni aşamanın kapsamı, görselleri ve devam noktası [POST_RELEASE.md](POST_RELEASE.md) içindedir. Main hâlâ `dfaddc1`; yeni özellikler main’e eklenmedi. Pages’in canlı doğrulaması ağ erişimi bekliyor.

@@ -1,0 +1,100 @@
+{
+  "label": "release",
+  "base": "dfaddc1",
+  "viewport": "440x956 CSS px",
+  "timezone": "Europe/Istanbul",
+  "data": "recorded public Izmir routes/businesses; live map; live server model catalog",
+  "screens": {
+    "home": {
+      "zoom": 15.6,
+      "pitch": 0,
+      "tilesLoaded": true,
+      "roadLabels": 2,
+      "dwellMinutes": 0
+    },
+    "home-3d": {
+      "zoom": 15.8,
+      "pitch": 48,
+      "tilesLoaded": true,
+      "roadLabels": 2,
+      "dwellMinutes": 0
+    },
+    "search": {
+      "zoom": 15.8,
+      "pitch": 0,
+      "tilesLoaded": true,
+      "roadLabels": 1,
+      "dwellMinutes": 0
+    },
+    "settings": {
+      "zoom": 15.8,
+      "pitch": 0,
+      "tilesLoaded": true,
+      "roadLabels": 1,
+      "dwellMinutes": 0
+    },
+    "models": {
+      "zoom": 15.8,
+      "pitch": 0,
+      "tilesLoaded": true,
+      "roadLabels": 1,
+      "dwellMinutes": 0
+    },
+    "routes": {
+      "zoom": 10.816239533175418,
+      "pitch": 0,
+      "tilesLoaded": false,
+      "roadLabels": 0,
+      "dwellMinutes": 0
+    },
+    "navigation": {
+      "zoom": 10.687875836422041,
+      "pitch": 0,
+      "tilesLoaded": true,
+      "roadLabels": 11,
+      "dwellMinutes": 0
+    },
+    "roadside": {
+      "zoom": 10.687875836422041,
+      "pitch": 0,
+      "tilesLoaded": true,
+      "roadLabels": 11,
+      "dwellMinutes": 0
+    },
+    "results": {
+      "zoom": 10.687875836422041,
+      "pitch": 0,
+      "tilesLoaded": true,
+      "roadLabels": 11,
+      "dwellMinutes": 0
+    },
+    "place": {
+      "zoom": 16,
+      "pitch": 0,
+      "tilesLoaded": true,
+      "roadLabels": 2,
+      "dwellMinutes": 0
+    },
+    "personal-places": {
+      "zoom": 15.5,
+      "pitch": 0,
+      "tilesLoaded": true,
+      "roadLabels": 1,
+      "dwellMinutes": 0
+    },
+    "settings-dark": {
+      "zoom": 15.5,
+      "pitch": 0,
+      "tilesLoaded": true,
+      "roadLabels": 1,
+      "dwellMinutes": 0
+    },
+    "home-dark": {
+      "zoom": 15.5,
+      "pitch": 0,
+      "tilesLoaded": true,
+      "roadLabels": 1,
+      "dwellMinutes": 0
+    }
+  }
+}

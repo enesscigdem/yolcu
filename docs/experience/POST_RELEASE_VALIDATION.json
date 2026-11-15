@@ -1,0 +1,32 @@
+{
+  "recordedAt": "2026-11-15T08:06:45.634Z",
+  "mainCommit": "dfaddc14423d6e21df13017127fcf3b28579875f",
+  "mainVersion": "2026.11.15.1",
+  "developmentBranch": "feat/post-release-stop-comfort",
+  "developmentCommit": "bf97bb2",
+  "developmentVersion": "2026.11.15.2-dev",
+  "unit": {
+    "passed": 59,
+    "failed": 0
+  },
+  "runs": [
+    {
+      "engine": "chromium",
+      "passed": 1,
+      "failed": 0,
+      "durationSeconds": 19.1
+    },
+    {
+      "engine": "webkit",
+      "passed": 1,
+      "failed": 0,
+      "durationSeconds": 12.4
+    }
+  ],
+  "liveVerification": {
+    "verified": false,
+    "applicationResponseReceived": false,
+    "reason": "Restricted network denies api.github.com and enesscigdem.github.io; proxy CONNECT 403, no HTTP application status"
+  },
+  "physicalIPhoneTested": false
+}
