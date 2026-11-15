@@ -218,3 +218,6 @@ input,textarea { -webkit-user-select:text;user-select:text; }
 .roadside { bottom:calc(10px + var(--safe-b) + var(--kb,0px));max-height:min(56dvh,590px,calc(100dvh - var(--kb,0px) - var(--safe-t) - var(--safe-b) - 24px)); }
 .page { bottom:var(--kb,0px); }
 .page-body,.roadside-content { scroll-padding-block:16px 80px; }
+/* A discovery dialog owns the bottom surface; retain the underlying sheet's
+   state while letting the map, rather than duplicate home cards, surround it. */
+.roadside-open #sheet { visibility:hidden;pointer-events:none; }

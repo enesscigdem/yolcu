@@ -41,14 +41,14 @@ test('parking makes a car route and explicitly hands off to a pedestrian destina
 });
 
 test('nearby places work without a route; detail, pins and back preserve context',async({page})=>{
- const errors=await setup(page);await mocks(page);await page.locator('[data-act=openRoadside]').first().click();
+ const errors=await setup(page);await mocks(page);const underlying=await page.evaluate(()=>({detent:__yolcu.sheet.detent,view:__yolcu.S.view,scroll:__yolcu.sheet.body.scrollTop}));await page.locator('[data-act=openRoadside]').first().click();await expect(page.locator('#sheet')).toBeHidden();await expect(page.locator('#map')).toBeVisible();
  await page.locator('[data-rs=category][data-id=fuel]').click();await expect(page.locator('.rs-summary')).not.toHaveCount(0);
  await expect(page.locator('#roadside')).toContainText('kuş uçuşu');await expect(page.locator('.rs-map-pin')).toHaveCount(await page.locator('.rs-summary').count());
  await page.locator('[data-rs=detail]').first().click();await expect(page.locator('[data-rs=directions]')).toBeVisible();await expect(page.locator('[data-rs=add]')).toHaveCount(0);
  await expect(page.locator('.rs-map-pin.selected')).toHaveCount(1);await page.locator('[data-rs=back]').click();await expect(page.locator('.rs-summary')).not.toHaveCount(0);
  await page.locator('[data-rs=back]').click();await expect(page.locator('[data-rs=preferences]')).toBeVisible();await expect(page.locator('.rs-map-pin')).toHaveCount(0);
  await page.locator('[data-rs=places]').click();await page.locator('[data-rs=reminders]').click();await page.locator('[data-rs=back]').click();await expect(page.locator('.roadside-head h2')).toHaveText('Benim yerlerim');
- await page.locator('[data-rs=back]').click();await page.locator('[data-rs=back]').click();await expect(page.locator('#roadside')).toBeHidden();expect(errors).toEqual([]);
+ await page.locator('[data-rs=back]').click();await page.locator('[data-rs=back]').click();await expect(page.locator('#roadside')).toBeHidden();await expect(page.locator('#sheet')).toBeVisible();expect(await page.evaluate(()=>({detent:__yolcu.sheet.detent,view:__yolcu.S.view,scroll:__yolcu.sheet.body.scrollTop}))).toEqual(underlying);expect(errors).toEqual([]);
 });
 
 test('map selection retains results and stop duration and never shows minus zero',async({page})=>{
