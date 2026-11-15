@@ -1,3 +1,5 @@
+> **Güncel main:** `dfaddc1`, sürüm `2026.11.15.1` Git ile birleştirildi ve pushlandı. PR API ve Pages doğrulaması ağ tarafından engelli; canlı yayın tamamlandı denmiyor. Devam branch’i: `feat/post-release-stop-comfort`. Ayrıntı: [RELEASE.md](RELEASE.md).
+
 > **Son yönlendirme:** Kullanıcı 15 Kasım’da mevcut sürümü kabul edip main/Pages yayını istedi. Önceki branch-only ifadeleri tarihsel geliştirme sınırıdır. Yayın ve devam noktası: [RELEASE.md](RELEASE.md).
 
 # Yolcu — kalıcı ilerleme ve devam noktası

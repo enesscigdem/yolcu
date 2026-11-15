@@ -22,3 +22,12 @@ PR oluşturulmuş veya Pages doğrulanmış gibi bildirilmez. Main Git üzerinde
 Yayın hedefi: https://enesscigdem.github.io/yolcu/
 
 GitHub Pages statiktir: güvenli Node backend bu yayınla dağıtılmaz. AI, TomTom ve resmî nöbetçi uçları Pages’te bağlı görünmez; anahtarsız harita/rota/arama ve cihazda komut çözümleme devam eder. Gerçek anahtarlar tarayıcıya taşınmaz.
+
+## Gerçek birleştirme ve yayın kaynağı sonucu
+
+- Kullanıcının yayın isteği sonrası geliştirme branch’i `b99a199` olarak gönderildi.
+- `main`, Git üzerinden `--no-ff` ile birleştirildi; `git push origin main` başarılı. Uzak main **`dfaddc14423d6e21df13017127fcf3b28579875f`**, sürüm **2026.11.15.1**. Koruma aşımı veya force push kullanılmadı.
+- PR API engeli nedeniyle **PR açılmadı; bir PR’ın birleştirildiği iddia edilmiyor**. Yetkilendirilen main birleştirmesi doğrudan Git ile yapıldı.
+- Main güncellemesi Pages için kaynak kodunu hazırlar. Pages’in kaynağını/build durumunu API’den okuma `Forbidden`; canlı URL kontrolü yine proxy 403 / HTTP 000. **Pages dağıtımının tamamlandığı ve canlı sürümün doğrulandığı henüz kanıtlanmadı.**
+- Doğrulama için çalışma ortamında `api.github.com` ve `enesscigdem.github.io` erişimi gerekiyor. Yeni erişim açıldığında Pages kaynağı/build sonucu ve canlı `js/assistant.js` içinde `2026.11.15.1` kontrol edilmeli; yanlış kaynak varsa önce ayarı düzeltilmeli.
+- Yayın kaynağına karışmadan devam branch’i: `feat/post-release-stop-comfort`. Sonraki geliştirmeler bu branch’e commit/push edilir.
