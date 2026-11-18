@@ -295,3 +295,115 @@ html[data-theme=dark] #dir-info{background:#1E2023;border-color:#34363A}
 /* Ekran görüntüsü için iPhone 15/16 güvenli alan simülasyonu (?frame=phone) */
 body.sim-safe #phone{--safe-top:54px;--safe-bottom:34px}
 body.sim-safe .fake-status{display:flex}body.sim-safe .home-ind{display:block}body.sim-safe #lab-btn{display:none}
+
+/* =========================================================
+   A · Kıyı — premium katman
+   Malzeme: buzlu sıcak beyaz / grafit cam. Tipografi: SF Pro + SF Pro Rounded rakamlar.
+   ========================================================= */
+#phone{--rounded:ui-rounded,"SF Pro Rounded","SF Pro Display",-apple-system,system-ui,sans-serif;--ease-spring:cubic-bezier(.32,1.25,.42,1);--ease-out:cubic-bezier(.2,.9,.22,1)}
+#phone[data-dir=a][data-theme=light]{--bg:rgba(250,248,245,.86);--card:#FFFFFF;--line:rgba(60,45,30,.10);--text:#1C1B19;--text2:#77716A;--text3:#AAA49B;--chip:rgba(120,105,90,.09);--field:rgba(120,105,90,.11);--hair:rgba(60,45,30,.09);--elev:0 .5px 0 rgba(255,255,255,.9) inset,0 1px 2px rgba(60,40,20,.05),0 6px 18px rgba(60,40,20,.06);--glass:rgba(252,251,249,.82);--glass-line:rgba(255,255,255,.7)}
+#phone[data-dir=a][data-theme=dark]{--bg:rgba(30,31,34,.84);--card:rgba(255,255,255,.06);--line:rgba(255,255,255,.07);--text:#F4F3F1;--text2:#A39F99;--text3:#6E6B67;--chip:rgba(255,255,255,.07);--field:rgba(255,255,255,.08);--hair:rgba(255,255,255,.07);--elev:0 .5px 0 rgba(255,255,255,.06) inset;--glass:rgba(32,33,36,.78);--glass-line:rgba(255,255,255,.08)}
+#phone[data-dir=a] #sheet{background:var(--bg);backdrop-filter:blur(40px) saturate(1.8);-webkit-backdrop-filter:blur(40px) saturate(1.8);box-shadow:inset 0 .5px 0 var(--glass-line),0 -1px 0 var(--hair),0 -20px 50px rgba(50,35,20,.14);border-radius:30px 30px 0 0}
+#phone[data-dir=a] #sheet.anim{transition:transform .5s var(--ease-spring)}
+#phone[data-dir=a] .grab::before{width:36px;background:var(--text);opacity:.18}
+#sheet-body.enter>*{animation:rise .42s var(--ease-out) both}
+#sheet-body.enter>*:nth-child(2){animation-delay:.03s}#sheet-body.enter>*:nth-child(3){animation-delay:.06s}#sheet-body.enter>*:nth-child(4){animation-delay:.09s}#sheet-body.enter>*:nth-child(n+5){animation-delay:.12s}
+@keyframes rise{from{opacity:0;transform:translateY(10px)}}
+#phone[data-dir=a] button{transition:transform .18s var(--ease-out),background-color .2s}
+#phone[data-dir=a] button:active{transform:scale(.97)}
+/* Arama ve kısayollar */
+#phone[data-dir=a] .searchbar{height:50px;border-radius:15px;background:var(--field);font-size:17px;color:var(--text2);gap:9px;padding:0 14px}
+#phone[data-dir=a] .searchbar svg{width:19px;height:19px;color:var(--text2)}
+#phone[data-dir=a] .icon-btn{width:50px;height:50px;border:0;background:var(--field)}
+#phone[data-dir=a] .icon-btn svg{width:21px;height:21px}
+#phone[data-dir=a] .favs{gap:8px;margin-top:12px}
+#phone[data-dir=a] .fav{min-height:52px;border-radius:26px;border:0;background:var(--card);box-shadow:var(--elev),0 0 0 .5px var(--hair);padding:0 16px 0 7px;gap:9px;font-size:16.5px}
+#phone[data-dir=a] .fav-ic{width:38px;height:38px;border-radius:19px;background:var(--chip);display:grid;place-items:center;flex:none}
+#phone[data-dir=a] .fav-ic svg{width:19px;height:19px;color:var(--text)}
+#phone[data-dir=a] .fav[data-k="İş"] .fav-ic{background:var(--accent);}#phone[data-dir=a] .fav[data-k="İş"] .fav-ic svg{color:#fff}
+#phone[data-dir=a] .fav em{font-family:var(--rounded);font-weight:700;font-size:16.5px}
+#phone[data-dir=a] .fav.add{width:52px;padding:0;border-radius:26px}
+#phone[data-dir=a] .pref-chip{height:40px;border:0;background:var(--chip);border-radius:20px;font-size:15px;font-weight:500;margin-top:12px;padding:0 12px}
+#phone[data-dir=a] .sec-head{margin:22px 4px 8px}
+#phone[data-dir=a] .sec-head h3{font-size:21px;font-weight:700;letter-spacing:-.022em}
+/* Gruplu liste (iOS ayarları gibi tek kap, ince ayraç) */
+#phone[data-dir=a] .list{gap:0;background:var(--card);border-radius:18px;box-shadow:var(--elev),0 0 0 .5px var(--hair);overflow:hidden}
+#phone[data-dir=a] .row{border:0;border-radius:0;background:none;min-height:66px;padding:10px 14px;gap:13px;position:relative}
+#phone[data-dir=a] .row+.row::before{content:"";position:absolute;top:0;left:65px;right:0;height:.5px;background:var(--hair)}
+#phone[data-dir=a] .row:active{background:var(--chip);transform:none}
+#phone[data-dir=a] .row-ic{width:38px;height:38px;background:var(--chip)}
+#phone[data-dir=a] .row-ic.tint{background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent)}
+#phone[data-dir=a] .row-main b{font-size:17px;font-weight:600;letter-spacing:-.01em}
+#phone[data-dir=a] .row-main small{font-size:14.5px}
+#phone[data-dir=a] .cats{gap:8px}
+#phone[data-dir=a] .cat{border:0;background:var(--card);box-shadow:var(--elev),0 0 0 .5px var(--hair);border-radius:18px;padding:14px 4px 12px}
+#phone[data-dir=a] .cat svg{width:24px;height:24px}
+/* Harita kontrolleri: tek cam kapsül */
+#phone[data-dir=a] #ctl{gap:0;border-radius:16px;overflow:hidden;background:var(--glass);backdrop-filter:blur(24px) saturate(1.8);-webkit-backdrop-filter:blur(24px) saturate(1.8);box-shadow:inset 0 .5px 0 var(--glass-line),0 0 0 .5px var(--hair),0 8px 24px rgba(40,30,20,.16)}
+#phone[data-dir=a] #ctl button{width:48px;height:48px;border-radius:0;background:none;box-shadow:none}
+#phone[data-dir=a] #ctl button+button{box-shadow:inset 0 .5px 0 var(--hair)}
+#phone[data-dir=a] #ctl svg{width:21px;height:21px}
+#ctl .t3d{font-family:var(--rounded);font-weight:700;font-size:15px;color:var(--text2)}#ctl .t3d.on{color:var(--accent)}
+/* Konum işareti */
+.puck .halo{position:absolute;left:50%;top:50%;width:64px;height:64px;margin:-32px;border-radius:50%;background:rgba(201,93,54,.16);animation:halo 2.6s ease-out infinite}
+@keyframes halo{0%{transform:scale(.35);opacity:.9}100%{transform:scale(1);opacity:0}}
+.puck .dot{width:22px;height:22px;margin:-11px;box-shadow:0 0 0 4px #fff,0 3px 10px rgba(60,30,10,.35)}
+/* Rota balonları */
+#phone[data-dir=a] .callout{border:0;border-radius:14px;padding:7px 11px;background:var(--glass);backdrop-filter:blur(18px) saturate(1.7);-webkit-backdrop-filter:blur(18px) saturate(1.7);box-shadow:inset 0 .5px 0 var(--glass-line),0 0 0 .5px var(--hair),0 6px 16px rgba(40,30,20,.18);font-family:var(--rounded)}
+#phone[data-dir=a] .callout::after{content:"";position:absolute;left:50%;bottom:-5px;width:10px;height:10px;margin-left:-5px;background:inherit;transform:rotate(45deg);border-radius:0 0 3px 0;box-shadow:1px 1px 0 var(--hair)}
+#phone[data-dir=a] .callout.sel{background:var(--accent);color:#fff;box-shadow:0 6px 18px rgba(201,93,54,.4)}
+#phone[data-dir=a] .callout b{font-size:16px}
+/* Rota kartları */
+#phone[data-dir=a] .routes-head h2{font-size:28px;font-weight:700;letter-spacing:-.03em}
+#phone[data-dir=a] .circle{background:var(--field)}
+#phone[data-dir=a] .route-card{border:0;background:var(--card);box-shadow:var(--elev),0 0 0 .5px var(--hair);border-radius:22px;padding:16px 18px}
+#phone[data-dir=a] .route-card.sel{background:var(--card);box-shadow:0 0 0 2px var(--accent),0 10px 28px rgba(201,93,54,.16)}
+#phone[data-dir=a] .rc-label{font-size:13px;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
+#phone[data-dir=a] .rc-time{font-family:var(--rounded)}
+#phone[data-dir=a] .rc-time b{font-size:48px;letter-spacing:-.04em;line-height:1.05}
+#phone[data-dir=a] .rc-sub{font-size:16px}
+#phone[data-dir=a] .strip{height:8px;border-radius:4px;margin:12px 0 4px;background:var(--chip)}
+#phone[data-dir=a] .pills{gap:8px 14px;margin-top:10px}
+#phone[data-dir=a] .pill{height:auto;padding:0;background:none;font-size:15px;font-weight:600;color:var(--text);gap:6px}
+#phone[data-dir=a] .pill svg{width:18px;height:18px;color:var(--accent)}
+#phone[data-dir=a] .pill.neutral{opacity:1;color:var(--text2);font-weight:500}#phone[data-dir=a] .pill.neutral svg{color:var(--text2)}
+#phone[data-dir=a] .rc-diff{margin-top:12px;padding-top:11px;box-shadow:inset 0 .5px 0 var(--hair);font-size:14.5px}
+#phone[data-dir=a] .cards{gap:0}
+#phone[data-dir=a] .cards .route-card.sel{margin-bottom:10px}
+#phone[data-dir=a] .route-card.mini{border-radius:0;box-shadow:none;background:var(--card);min-height:62px;padding:10px 16px;position:relative}
+#phone[data-dir=a] .route-card.mini:nth-child(2){border-radius:18px 18px 0 0}
+#phone[data-dir=a] .route-card.mini:last-child{border-radius:0 0 18px 18px}
+#phone[data-dir=a] .route-card.mini:nth-child(2):last-child{border-radius:18px}
+#phone[data-dir=a] .route-card.mini+.route-card.mini::before{content:"";position:absolute;top:0;left:16px;right:0;height:.5px;background:var(--hair)}
+#phone[data-dir=a] .cards{filter:drop-shadow(0 1px 1px rgba(60,40,20,.04))}
+#phone[data-dir=a] .mini-t b{font-family:var(--rounded);font-size:21px}
+#phone[data-dir=a] .route-card.mini .rc-label{font-size:12px}
+#phone[data-dir=a] .primary{height:56px;border-radius:17px;background:linear-gradient(180deg,#D3683F,#C2542E);box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 10px 24px rgba(201,93,54,.32);font-size:18px;letter-spacing:-.01em}
+#phone[data-dir=a] .budget{border:0;background:var(--card);box-shadow:var(--elev),0 0 0 .5px var(--hair);border-radius:18px}
+#phone[data-dir=a] .stepper{background:var(--field)}
+#phone[data-dir=a] .stepper output{font-family:var(--rounded)}
+#phone[data-dir=a] .trip-stats div{border:0;background:var(--card);box-shadow:var(--elev),0 0 0 .5px var(--hair);border-radius:18px}
+#phone[data-dir=a] .trip-stats b{font-family:var(--rounded);font-size:28px}
+#phone[data-dir=a] .secondary{background:var(--field)}
+/* Sürüş */
+#phone[data-dir=a] .banner{border-radius:28px;background:linear-gradient(180deg,#2A2C30,#1D1E21);color:#fff;box-shadow:inset 0 .5px 0 rgba(255,255,255,.09),0 0 0 .5px rgba(0,0,0,.4),0 18px 40px rgba(0,0,0,.35)}
+#phone[data-dir=a][data-theme=light] .banner{background:var(--glass);color:var(--text);backdrop-filter:blur(30px) saturate(1.8);-webkit-backdrop-filter:blur(30px) saturate(1.8);box-shadow:inset 0 .5px 0 var(--glass-line),0 0 0 .5px var(--hair),0 16px 36px rgba(40,30,20,.18)}
+#phone[data-dir=a] .bn-main{padding:18px 20px 16px 18px;gap:14px}
+#phone[data-dir=a] .bn-arrow{width:70px;height:70px;color:inherit}
+#phone[data-dir=a] .bn-text b{font-family:var(--rounded);font-size:46px;letter-spacing:-.04em}
+#phone[data-dir=a] .bn-text>span{font-size:21px;font-weight:600}
+#phone[data-dir=a] .bn-text small{font-size:17px;opacity:.65}
+#phone[data-dir=a] .bn-then{border-top:0;background:rgba(0,0,0,.22);padding:12px 20px 14px;font-weight:500}
+#phone[data-dir=a][data-theme=light] .bn-then{background:rgba(120,105,90,.08)}
+#phone[data-dir=a] .round,#phone[data-dir=a] .speed,#phone[data-dir=a] .street,#phone[data-dir=a] .dash{background:var(--glass);color:var(--text);backdrop-filter:blur(30px) saturate(1.8);-webkit-backdrop-filter:blur(30px) saturate(1.8);box-shadow:inset 0 .5px 0 var(--glass-line),0 0 0 .5px var(--hair),0 10px 28px rgba(0,0,0,.22)}
+#phone[data-dir=a][data-theme=dark] .round,#phone[data-dir=a][data-theme=dark] .speed,#phone[data-dir=a][data-theme=dark] .street,#phone[data-dir=a][data-theme=dark] .dash{background:rgba(30,31,34,.82)}
+#phone[data-dir=a] .dash{border-radius:28px}
+#phone[data-dir=a] .dash-time b{font-family:var(--rounded);font-size:48px;letter-spacing:-.04em}
+#phone[data-dir=a] .dash-sub{font-size:17px;opacity:.7}
+#phone[data-dir=a] .dash-btn{border:0;background:var(--chip);border-radius:18px}
+#phone[data-dir=a] .speed b{font-family:var(--rounded);font-size:30px}
+#phone[data-dir=a] .street{font-weight:600}
+#phone[data-dir=a] .recenter{background:linear-gradient(180deg,#D3683F,#C2542E);box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 10px 24px rgba(201,93,54,.4)}
+#phone[data-dir=a] .pop-card{background:var(--glass);backdrop-filter:blur(36px) saturate(1.8);-webkit-backdrop-filter:blur(36px) saturate(1.8);box-shadow:inset 0 .5px 0 var(--glass-line),0 24px 60px rgba(0,0,0,.3)}
+#phone[data-dir=a][data-theme=dark] .pop-card{background:rgba(36,37,40,.86)}
+#phone[data-dir=a] .route-card.sel .radio{box-shadow:0 2px 6px rgba(201,93,54,.4)}

@@ -9,7 +9,7 @@ export async function baseStyle() { return base ||= await fetch(STYLE_URL).then(
 export const PAL = {
   a: {
     light: { land: '#F0ECE5', resi: '#ECE7DF', park: '#D9E0C8', wood: '#CCD7BA', water: '#BFD3D9', sand: '#EEE6D2',
-      b: ['#E4DED4', '#DFD8CC', '#E8E2D8'], bTall: '#D2CABD', bFlat: '#E2DCD2', bOp: .96,
+      b: ['#F2EDE5', '#EEE8DF', '#F5F1EA'], bTall: '#E2DACE', bFlat: '#E8E2D9', bOp: 1,
       mw: '#F6E4BE', mwC: '#D8BC86', pri: '#FFFFFF', priC: '#D3CBBE', sec: '#FFFFFF', secC: '#DAD3C8', min: '#FFFFFF', minC: '#E2DCD2', path: '#E6E0D6', rail: '#D4CEC4',
       label: '#2F2F31', road: '#56565B', place: '#77777D', water_l: '#5B86A6', halo: '#FFFFFF', sky: '#DCE4E2', fog: '#F2EFEA', light: .38 },
     dark: { land: '#1A1C1E', resi: '#1D1F21', park: '#1D2922', wood: '#1A261E', water: '#13262B', sand: '#2A2925',
@@ -127,7 +127,7 @@ export function buildStyle(src, opts) {
   const firstLine = s.layers.findIndex(l => l.id.startsWith('tunnel_'));
   s.layers.splice(firstLine, 0, { id: 'lab-sat', type: 'raster', source: 'sat', layout: { visibility: opts.sat ? 'visible' : 'none' }, paint: { 'raster-fade-duration': 120, 'raster-saturation': -.05 } });
   if (opts.sat) for (const l of s.layers) if (l.type === 'fill' || l.type === 'fill-extrusion') (l.layout ||= {}).visibility = 'none';
-  s.light = { anchor: 'map', color: '#fff8ee', intensity: P.light, position: [1.15, 210, 38] };
+  s.light = { anchor: 'map', color: '#fff6ea', intensity: P.light * .78, position: [1.2, 315, 42] };
   s.sky = { 'sky-color': opts.sat ? '#9CC0E0' : P.sky, 'horizon-color': P.fog, 'fog-color': P.fog, 'sky-horizon-blend': .6, 'horizon-fog-blend': .8, 'fog-ground-blend': .85, 'atmosphere-blend': ['interpolate', ['linear'], ['zoom'], 12, .6, 17, .2] };
   return s;
 }

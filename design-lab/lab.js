@@ -3,6 +3,8 @@
 import { cumulative, pointAt, bearing, sliceAlong } from '../js/geo.js';
 import * as G from '../js/guide.js';
 import { baseStyle, buildStyle } from './mapstyle-lab.js';
+import { attachRealism } from './realism.js';
+let realism = null;
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -123,16 +125,19 @@ function routeFC(selOnly) {
 }
 const css = n => getComputedStyle(phone).getPropertyValue(n).trim();
 function overlays() {
+  realism?.stop(); realism = (S.sat || S.flat) ? null : attachRealism(map, { theme: theme() });
   if (!map.getSource('routes')) map.addSource('routes', { type: 'geojson', data: routeFC(), lineMetrics: true });
   const accent = css('--route'), accentC = css('--route-case'), alt = css('--alt'), altC = css('--alt-case'), done = css('--route-done');
   const before = map.getLayer('highway-name-minor') ? 'highway-name-minor' : undefined;
   const lw = (a, b, c) => ['interpolate', ['exponential', 1.4], ['zoom'], 10, a, 14, b, 18, c];
   map.addLayer({ id: 'alt-case', type: 'line', source: 'routes', filter: ['==', ['get', 'sel'], 0], layout: { 'line-cap': 'round', 'line-join': 'round', visibility: S.screen === 'routes' ? 'visible' : 'none' }, paint: { 'line-color': altC, 'line-width': lw(6, 10, 26) } }, before);
   map.addLayer({ id: 'alt', type: 'line', source: 'routes', filter: ['==', ['get', 'sel'], 0], layout: { 'line-cap': 'round', 'line-join': 'round', visibility: S.screen === 'routes' ? 'visible' : 'none' }, paint: { 'line-color': alt, 'line-width': lw(4, 7, 20) } }, before);
+  map.addLayer({ id: 'sel-glow', type: 'line', source: 'routes', filter: ['==', ['get', 'sel'], 1], layout: { 'line-cap': 'round', 'line-join': 'round', visibility: ['routes', 'trip'].includes(S.screen) ? 'visible' : 'none' }, paint: { 'line-color': accent, 'line-opacity': .28, 'line-blur': lw(4, 8, 18), 'line-width': lw(12, 20, 46) } }, before);
   map.addLayer({ id: 'sel-case', type: 'line', source: 'routes', filter: ['==', ['get', 'sel'], 1], layout: { 'line-cap': 'round', 'line-join': 'round', visibility: ['routes', 'drive', 'trip'].includes(S.screen) ? 'visible' : 'none' }, paint: { 'line-color': accentC, 'line-width': lw(7, 11.5, 30) } }, before);
   map.addLayer({ id: 'sel', type: 'line', source: 'routes', filter: ['==', ['get', 'sel'], 1], layout: { 'line-cap': 'round', 'line-join': 'round', visibility: ['routes', 'drive', 'trip'].includes(S.screen) ? 'visible' : 'none' }, paint: { 'line-color': accent, 'line-width': lw(4.5, 8, 22) } }, before);
   map.setPaintProperty('sel', 'line-gradient', progressGradient(S.sim ? S.sim.along / ROUTES[S.sel].lengthM : 0, accent, done));
   map.setPaintProperty('sel-case', 'line-gradient', progressGradient(S.sim ? S.sim.along / ROUTES[S.sel].lengthM : 0, accentC, 'rgba(0,0,0,0)'));
+  if (S.screen === 'routes' || S.screen === 'trip') drawIn(accent, accentC);
   if (!map._labAltClick) { map._labAltClick = true; map.on('click', e => { if (S.screen !== 'routes' || !map.getLayer('alt')) return; const f = map.queryRenderedFeatures([[e.point.x - 12, e.point.y - 12], [e.point.x + 12, e.point.y + 12]], { layers: ['alt'] })[0]; if (f) selectRoute(+f.properties.i); }); }
   if (S.screen === 'trip') {
     map.addSource('avoid', { type: 'geojson', data: avoidFC() });
@@ -143,22 +148,43 @@ function progressGradient(f, a, done) {
   f = clamp(f, 0, .9999);
   return f <= 0.0001 ? ['step', ['line-progress'], a, 1, a] : ['step', ['line-progress'], done, f, a];
 }
+// Rota çizgisi başlangıçtan hedefe doğru “çizilerek” belirir
+function drawIn(a, c) {
+  const t0 = performance.now(), D = 900, none = 'rgba(0,0,0,0)';
+  const step = now => {
+    if (!map.getLayer('sel')) return;
+    const k = Math.min(1, (now - t0) / D), f = 1 - Math.pow(1 - k, 3);
+    const g = col => f >= .999 ? ['step', ['line-progress'], col, 1, col] : ['step', ['line-progress'], col, Math.max(.001, f), none];
+    map.setPaintProperty('sel', 'line-gradient', g(a)); map.setPaintProperty('sel-case', 'line-gradient', g(c));
+    map.setPaintProperty('sel-glow', 'line-opacity', .28 * f);
+    if (k < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
 function setRoutes() { map?.getSource('routes')?.setData(routeFC()); }
 
 /* ---------- Konum işareti ve araç ---------- */
-const CAR_SVG = `<svg viewBox="0 0 60 104" width="34" height="59" aria-hidden="true">
- <defs><linearGradient id="cb" x1="0" x2="1"><stop offset="0" stop-color="#D9D6D0"/><stop offset=".22" stop-color="#FBFAF8"/><stop offset=".78" stop-color="#FBFAF8"/><stop offset="1" stop-color="#D9D6D0"/></linearGradient></defs>
- <rect x="8" y="5" width="44" height="94" rx="17" fill="url(#cb)" stroke="#25262A" stroke-opacity=".35"/>
- <ellipse cx="6.5" cy="38" rx="3.2" ry="4.4" fill="#E9E6E0" stroke="#25262A" stroke-opacity=".3"/><ellipse cx="53.5" cy="38" rx="3.2" ry="4.4" fill="#E9E6E0" stroke="#25262A" stroke-opacity=".3"/>
- <path d="M13.5 35.5Q30 27 46.5 35.5L43.5 49Q30 45.5 16.5 49Z" fill="#2A2E34"/>
- <rect x="16" y="50" width="28" height="27" rx="6" fill="#F1EFEA"/>
- <path d="M17 80Q30 83.5 43 80L44.5 89.5Q30 94 15.5 89.5Z" fill="#2A2E34"/>
- <rect x="13" y="7" width="9" height="4" rx="2" fill="#FFF3CF"/><rect x="38" y="7" width="9" height="4" rx="2" fill="#FFF3CF"/>
- <rect x="12" y="94" width="10" height="3.5" rx="1.7" fill="#C95D36"/><rect x="38" y="94" width="10" height="3.5" rx="1.7" fill="#C95D36"/>
+const CAR_SVG = `<svg viewBox="0 0 64 112" width="36" height="63" aria-hidden="true">
+ <defs>
+  <linearGradient id="cb" x1="0" x2="1"><stop offset="0" stop-color="#CFCBC4"/><stop offset=".18" stop-color="#F7F6F3"/><stop offset=".5" stop-color="#FFFFFF"/><stop offset=".82" stop-color="#F2F0EC"/><stop offset="1" stop-color="#C9C5BE"/></linearGradient>
+  <linearGradient id="cg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3B434C"/><stop offset="1" stop-color="#1D2126"/></linearGradient>
+  <linearGradient id="cr" x1="0" x2="1"><stop offset="0" stop-color="#E9E6E1"/><stop offset=".5" stop-color="#FFFFFF"/><stop offset="1" stop-color="#E4E1DB"/></linearGradient>
+  <radialGradient id="cs" cx=".5" cy=".5" r=".5"><stop offset=".55" stop-color="#000" stop-opacity=".45"/><stop offset="1" stop-color="#000" stop-opacity="0"/></radialGradient>
+ </defs>
+ <ellipse cx="32" cy="58" rx="31" ry="54" fill="url(#cs)"/>
+ <path d="M14 14Q14 5 32 5Q50 5 50 14L52 40L52 92Q52 106 32 106Q12 106 12 92L12 40Z" fill="url(#cb)" stroke="#1E2024" stroke-opacity=".28" stroke-width="1"/>
+ <path d="M8.5 40.5q-1.6-.4-1.8 1.4l-.2 3.6q.1 1.6 1.8 1.3l3.7-.8v-4.8zM55.5 40.5q1.6-.4 1.8 1.4l.2 3.6q-.1 1.6-1.8 1.3l-3.7-.8v-4.8z" fill="#E7E4DF" stroke="#1E2024" stroke-opacity=".25"/>
+ <path d="M16 37Q32 29 48 37L45 52Q32 48.5 19 52Z" fill="url(#cg)"/>
+ <path d="M20 39Q30 34.5 40 37.5L38.5 41Q29 38.5 21.5 42Z" fill="#fff" opacity=".18"/>
+ <rect x="19" y="53" width="26" height="28" rx="6" fill="url(#cr)"/>
+ <path d="M19 84Q32 87.5 45 84L46.5 95Q32 99.5 17.5 95Z" fill="url(#cg)"/>
+ <path d="M15 52l3 1v27l-3 2zM49 52l-3 1v27l3 2z" fill="#2A2F35" opacity=".85"/>
+ <rect x="16" y="7.5" width="9" height="3.6" rx="1.8" fill="#FFF4D2"/><rect x="39" y="7.5" width="9" height="3.6" rx="1.8" fill="#FFF4D2"/>
+ <rect x="15" y="101.5" width="10" height="3" rx="1.5" fill="#C95D36"/><rect x="39" y="101.5" width="10" height="3" rx="1.5" fill="#C95D36"/>
 </svg>`;
 function ensurePuck() {
   if (!puck) {
-    const el = document.createElement('div'); el.className = 'puck'; el.innerHTML = '<i class="cone"></i><i class="dot"></i>';
+    const el = document.createElement('div'); el.className = 'puck'; el.innerHTML = '<i class="halo"></i><i class="cone"></i><i class="dot"></i>';
     puck = new maplibregl.Marker({ element: el, rotationAlignment: 'map', pitchAlignment: 'map' }).setLngLat([START.lon, START.lat]).setRotation(28).addTo(map);
   }
   puck.getElement().hidden = S.screen === 'drive';
@@ -236,7 +262,7 @@ function sheetChanged() {
 /* ---------- Ekranlar ---------- */
 function favs() {
   const { best } = choose(S.budget);
-  const fav = (icon, label, extra) => `<button class="fav" data-act="fav" data-k="${label}">${IC[icon]}<b>${label}</b>${extra ? `<em>${extra}</em>` : ''}</button>`;
+  const fav = (icon, label, extra) => `<button class="fav" data-act="fav" data-k="${label}"><span class="fav-ic">${IC[icon]}</span><b>${label}</b>${extra ? `<em>${extra}</em>` : ''}</button>`;
   return `${fav('home', 'Ev', '')}${fav('work', 'İş', fmtMin(best.time) + ' dk')}<button class="fav add" data-act="toast" data-msg="Yer ekleme: haritada basılı tut veya ara" aria-label="Yer ekle">${IC.plus}</button>`;
 }
 const TRIPS = [
@@ -246,7 +272,7 @@ const TRIPS = [
 ];
 const prefLabel = () => ({ main: 'Ana yol odaklı', fast: 'En hızlı', balanced: 'Dengeli' }[S.pref]);
 function viewHome() {
-  const trips = TRIPS.slice(0, 3).map((t, i) => `<button class="row" data-act="trip" data-i="${i}"><span class="row-ic">${IC[t.icon]}</span><span class="row-main"><b>${esc(t.t)} <span class="dim">· ${esc(t.s)}</span></b><small>${esc(t.m)}</small></span><span class="chev">${IC.right}</span></button>`).join('');
+  const trips = TRIPS.slice(0, 3).map((t, i) => `<button class="row" data-act="trip" data-i="${i}"><span class="row-ic ${t.icon === 'work' ? 'tint' : ''}">${IC[t.icon]}</span><span class="row-main"><b>${esc(t.t)} <span class="dim">· ${esc(t.s)}</span></b><small>${esc(t.m)}</small></span><span class="chev">${IC.right}</span></button>`).join('');
   const { best } = choose(S.budget);
   const next = S.dir === 'c' ? `<button class="next-card" data-act="goWork"><span class="next-ic">${IC.work}</span><span class="next-main"><small>Sıradaki · hafta içi 08:10 alışkanlığı</small><b>İş’e ${fmtMin(best.time)} dk</b><span>${esc(best.via.split(' · ')[0])} üzerinden · ${clock(best.time)} varış</span></span><span class="go">${IC.play}</span></button>` : '';
   return `<div class="home-top" data-peek>
@@ -431,9 +457,9 @@ function render() {
   document.documentElement.dataset.theme = theme();
   const drive = S.screen === 'drive';
   $('#sheet').hidden = drive; $('#drive').hidden = !drive; $('#ctl').hidden = drive;
-  if (!drive) { stopSim(); sheet.body.innerHTML = S.screen === 'home' ? viewHome() : S.screen === 'routes' ? viewRoutes() : viewTrip(); }
+  if (!drive) { stopSim(); sheet.body.innerHTML = S.screen === 'home' ? viewHome() : S.screen === 'routes' ? viewRoutes() : viewTrip(); sheet.body.classList.remove('enter'); void sheet.body.offsetWidth; sheet.body.classList.add('enter'); }
   else $('#drive').innerHTML = driveHTML();
-  $('#ctl').innerHTML = `<button data-act="pop" data-pop="layers" aria-label="Harita katmanları">${IC.layers}</button><button data-act="locate" aria-label="Konumuma git">${IC.locate}</button>`;
+  $('#ctl').innerHTML = `<button data-act="pop" data-pop="layers" aria-label="Harita katmanları">${IC.layers}</button><button data-act="flat3d" class="t3d ${S.flat ? '' : 'on'}" aria-label="3B görünüm">3B</button><button data-act="locate" aria-label="Konumuma git">${IC.locate}</button>`;
   syncRail();
 }
 async function go(screen, opts = {}) {
@@ -442,33 +468,48 @@ async function go(screen, opts = {}) {
   render();
   await applyStyle();
   ensurePuck(); ensureCar();
-  if (screen === 'home') { sheet.set(S.detent || 'half', false); map.jumpTo({ center: [START.lon, START.lat], zoom: 15.7, pitch: S.dir === 'c' ? 0 : 38, bearing: -18, padding: { top: 0, bottom: sheet.visible() - 20, left: 0, right: 0 } }); }
+  if (screen === 'home') { sheet.set(S.detent || 'half', false); map.jumpTo({ center: [START.lon, START.lat], zoom: 16.9, pitch: S.dir === 'c' ? 0 : 52, bearing: -16, padding: { top: 0, bottom: sheet.visible() - 20, left: 0, right: 0 } }); }
   if (screen === 'routes' || screen === 'trip') { setRoutes(); sheet.set(S.detent || 'half', false); }
-  if (screen === 'drive') { setRoutes(); car.setLngLat(ROUTES[S.sel].coords[0]); startSim(); }
+  if (screen === 'drive') {
+    setRoutes(); const r = ROUTES[S.sel]; car.setLngLat(r.coords[0]); startSim(); S.follow = false;
+    const a = r.coords[0], b2 = pointAt(r.coords, r.cum, 45);
+    map.jumpTo({ center: a, zoom: 15.2, pitch: 0, bearing: 0 });
+    const follow = () => { if (S.screen === 'drive' && $('#recenter')?.hidden !== false) S.follow = true; };
+    if (q.get('fast')) follow();
+    else { map.once('moveend', follow); map.flyTo({ center: a, zoom: 17.5, pitch: { a: 58, b: 54, c: 62 }[S.dir], bearing: bearing(a[0], a[1], b2.lon, b2.lat), padding: drivePadding(), duration: 1500, curve: 1.2, essential: true }); }
+  }
   const u = new URL(location.href); u.searchParams.set('d', S.dir); u.searchParams.set('s', screen); history.replaceState(null, '', u);
   S.detent = null;
 }
 function fitRoutes(bottom, selOnly) {
   const b = new maplibregl.LngLatBounds(); (selOnly ? [ROUTES[S.sel]] : ROUTES).forEach(r => r.coords.forEach(c => b.extend(c)));
   map.fitBounds(b, { padding: { top: parseFloat(css('--safe-top')) + 40, bottom: bottom + 24, left: 34, right: 70 }, pitch: 0, bearing: 0, duration: 500 });
-  if (!selOnly) setTimeout(drawCallouts, 560);
+  if (!selOnly) clearCallouts();
 }
 function clearCallouts() { callouts.forEach(m => m.remove()); callouts = []; }
 function drawCallouts() {
   clearCallouts(); if (S.screen !== 'routes') return;
-  const { fastest } = choose(S.budget), sel = ROUTES[S.sel];
-  for (const r of ROUTES) {
-    // Etiket rotanın diğerlerinden en uzak noktasına konur
+  const sel = ROUTES[S.sel], W = phone.clientWidth, top = parseFloat(css('--safe-top')) + 50, bottom = phone.clientHeight - sheet.visible() - 40;
+  const placed = [];
+  // Seçili rota önce; her balon görünür harita alanında, diğer rotalardan en uzak ve birbirinden ayrık noktada
+  for (const r of [sel, ...ROUTES.filter(x => x !== sel)]) {
     let bestP = null, bestD = -1;
-    for (let k = Math.floor(r.coords.length * .2); k < r.coords.length * .8; k += 6) {
-      const c = r.coords[k]; let dmin = Infinity;
+    for (let k = Math.floor(r.coords.length * .12); k < r.coords.length * .9; k += 3) {
+      const c = r.coords[k], px = map.project(c);
+      if (px.x < 50 || px.x > W - 80 || px.y < top || px.y > bottom) continue;
+      if (placed.some(p => Math.hypot(p.x - px.x, p.y - px.y) < 78)) continue;
+      let dmin = Infinity;
       for (const o of ROUTES) if (o !== r) for (let j = 0; j < o.coords.length; j += 4) dmin = Math.min(dmin, Math.hypot(o.coords[j][0] - c[0], o.coords[j][1] - c[1]));
-      if (dmin > bestD) { bestD = dmin; bestP = c; }
+      if (dmin > bestD) { bestD = dmin; bestP = { c, x: px.x, y: px.y }; }
     }
+    if (bestP && r !== sel && bestD < .002) bestP = null; // rotalar burada üst üste; ayrı balon anlamsız
+    {
+    }
+    if (!bestP) continue; placed.push(bestP);
     const el = document.createElement('button'); el.className = 'callout' + (r === sel ? ' sel' : '');
     const dd = r === sel ? '' : ` <small>${r.time >= sel.time ? '+' : '−'}${fmtMin(Math.abs(r.time - sel.time))}</small>`;
     el.innerHTML = `<b>${fmtMin(r.time)} dk</b>${dd}`; el.addEventListener('click', e => { e.stopPropagation(); selectRoute(r.i); });
-    callouts.push(new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat(bestP).addTo(map));
+    callouts.push(new maplibregl.Marker({ element: el, anchor: 'bottom', offset: [0, -6] }).setLngLat(bestP.c).addTo(map));
   }
 }
 function selectRoute(i) { S.sel = i; setRoutes(); const st = sheet.body.querySelector('.cards')?.scrollLeft; sheet.body.innerHTML = viewRoutes(); if (st != null && sheet.body.querySelector('.cards')) sheet.body.querySelector('.cards').scrollLeft = st; drawCallouts(); bindCarousel(); }
@@ -495,6 +536,7 @@ document.addEventListener('click', e => {
     pref: () => { S.pref = b.dataset.v; S.budget = { main: 5, balanced: 3, fast: 0 }[S.pref]; closePop(); if (S.screen === 'routes') { S.sel = choose(S.budget).best.i; selectRoute(S.sel); } else render(); },
     tog: () => { S[b.dataset.k] = !S[b.dataset.k]; openPop('pref'); },
     sound: () => { S.sound = b.dataset.v; closePop(); $('#drive').querySelector('.d-ctl .round').innerHTML = IC[{ silent: 'mute', alerts: 'bell', guidance: 'speaker' }[S.sound]]; toast({ silent: 'Tamamen sessiz', alerts: 'Yalnız uyarılar', guidance: 'Yönlendirme + uyarılar' }[S.sound]); },
+    flat3d: () => { S.flat = !S.flat; b.classList.toggle('on', !S.flat); map.easeTo({ pitch: S.flat ? 0 : 40, duration: 600 }); applyStyle(); },
     sat: () => { S.sat = b.dataset.v === '1'; closePop(); applyStyle(); }, flat: () => { S.flat = !S.flat; openPop('layers'); applyStyle(); },
     theme: () => { S.theme = theme() === 'dark' ? 'light' : 'dark'; closePop(); render(); applyStyle(); setTimeout(() => sheet.set(sheet.det, false), 30); },
     locate: () => map.easeTo({ center: [START.lon, START.lat], zoom: 16.4, duration: 600 }),
@@ -521,7 +563,8 @@ async function boot() {
   await loadRoutes();
   map = new maplibregl.Map({ container: 'map', style: { version: 8, sources: {}, layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#EEE' } }] }, center: [START.lon, START.lat], zoom: 16.2, pitch: 40, bearing: -18, attributionControl: false, maxPitch: 70, fadeDuration: 150 });
   ['dragstart', 'rotatestart', 'pitchstart', 'zoomstart'].forEach(ev => map.on(ev, e => { if (e.originalEvent && S.screen === 'drive' && S.follow) { S.follow = false; const r = $('#recenter'); if (r) r.hidden = false; } }));
-  window.__lab = { S, map, go, ROUTES };
+  let ct; map.on('moveend', () => { if (S.screen !== 'routes') return; clearTimeout(ct); ct = setTimeout(drawCallouts, 90); });
+  window.__lab = { S, map, go, ROUTES, drawCallouts, sheet };
   sheet.bind();
   addEventListener('resize', () => { if (S.screen !== 'drive') sheet.set(sheet.det, false); });
   render();
