@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Yolcu · Tasarım yönleri</title>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<link rel="stylesheet" href="lab.css">
+</head>
+<body>
+<div id="lab">
+  <aside id="rail" aria-label="Tasarım laboratuvarı">
+    <h1>Yolcu · Tasarım yönleri</h1>
+    <p class="lede">Üç farklı yön, aynı gerçek harita ve aynı gerçek İzmir rotaları (Karabağlar → Bornova, Valhalla kaydı). Panel sürüklenebilir, rota kartları seçilebilir, sürüş canlı simüle edilir.</p>
+    <div class="rail-group"><small>Yön</small><div class="seg-rail dirs">
+      <button data-act="dir" data-v="a">A · Kıyı<span>Referansa sadık</span></button>
+      <button data-act="dir" data-v="b">B · Ada<span>Yüzen cam</span></button>
+      <button data-act="dir" data-v="c">C · Pano<span>Sürüş odaklı</span></button></div></div>
+    <div class="rail-group"><small>Ekran</small><div class="seg-rail">
+      <button data-act="scr" data-v="home">Ana</button><button data-act="scr" data-v="routes">Rota</button><button data-act="scr" data-v="drive">Sürüş</button><button data-act="scr" data-v="trip">Yolculuk</button></div></div>
+    <div class="rail-group"><small>Görünüm</small><div class="seg-rail">
+      <button data-act="th" data-v="auto">Otomatik</button><button data-act="th" data-v="light">Gündüz</button><button data-act="th" data-v="dark">Gece</button></div></div>
+    <div id="dir-info"></div>
+    <p class="rail-note">Gerçek: harita, bina yükseklikleri, rotalar, süreler, yol sınıfları, manevralar. Örnek: “Son yolculuklar” listesi ve yolculuk tarihi. Canlı trafik bu önizlemede yok. Hiçbir ses API’si kullanılmaz.</p>
+  </aside>
+  <div id="phone" data-dir="a" data-theme="light" data-screen="home">
+    <div id="map"></div>
+    <div class="fake-status"><span>16:47</span><i>●●●● ᯤ ▮</i></div>
+    <div id="ctl"></div>
+    <section id="sheet" aria-label="Alt panel"><div class="grab" aria-hidden="true"></div><div id="sheet-body"></div></section>
+    <div id="drive" hidden></div>
+    <div id="pop" hidden></div>
+    <div id="toast" role="status" hidden></div>
+    <div class="home-ind"></div>
+  </div>
+</div>
+<button id="lab-btn" data-act="lab" aria-label="Tasarım seçenekleri">Y</button>
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script type="module" src="lab.js"></script>
+</body>
+</html>
